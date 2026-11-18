@@ -103,6 +103,14 @@ filterwarnings = [
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]
+"examples/**/*.py" = [
+    "D",  # Runnable scripts, not API: docstring rules do not apply
+    "INP001",  # Standalone scripts, not a package
+    "T201",  # Examples print what the agent and Jev decided
+    "RUF001",  # Examples are written in Traditional Chinese for this fork's users,
+    "RUF002",  # so strings, docstrings, and comments use full-width punctuation
+    "RUF003",
+]
 "tests/**/*.py" = [
     "S101",
     "D",

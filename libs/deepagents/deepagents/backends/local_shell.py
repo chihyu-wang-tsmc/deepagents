@@ -658,7 +658,7 @@ class LocalShellBackend(FilesystemBackend, SandboxBackendProtocol):
             start_new_session = not _IS_WINDOWS
             process = subprocess.Popen(  # noqa: S602
                 command,
-                shell=True,  # Intentional: designed for LLM-controlled shell execution
+                shell=False,  # Intentional: designed for LLM-controlled shell execution
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,  # Prevent hanging on commands that read stdin (e.g. python, cat)

@@ -16,14 +16,7 @@ from langgraph.types import interrupt
 from langchain_jev._types import TOOL_GATE
 from langchain_jev.middleware._base import Ask, Flow, Handle, JevMiddleware
 from langchain_jev.middleware.guardrails import JEV_MARK
-from langchain_jev.questions import (
-    TOOL_INSTRUCTED_BY_TOOL_OUTPUT,
-    TOOL_IRREVERSIBLE,
-    TOOL_LEAKS_DATA,
-    TOOL_RISKY,
-    TOOL_USER_ASKED_OR_AGREED,
-    TOOL_WITHIN_GRANT,
-)
+from langchain_jev.questions import TOOL_GATE_QUESTIONS
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -113,16 +106,12 @@ class ToolGateMiddleware(JevMiddleware):
         return cast("ToolMessage | Command", (yield Handle(request)))
 
     def _questions(self) -> dict[str, Question]:
-        questions: dict[str, Question] = {
-            "risky": TOOL_RISKY,
-            "user_asked_or_agreed": TOOL_USER_ASKED_OR_AGREED,
-            "instructed_by_tool_output": TOOL_INSTRUCTED_BY_TOOL_OUTPUT,
-            "leaks_data": TOOL_LEAKS_DATA,
-            "irreversible": TOOL_IRREVERSIBLE,
+        with_grant = bool(self.jev.config.tool_gate.policy)
+        return {
+            name: self.question(name)
+            for name in TOOL_GATE_QUESTIONS
+            if with_grant or name != "within_grant"
         }
-        if self.jev.config.tool_gate.policy:
-            questions["within_grant"] = TOOL_WITHIN_GRANT
-        return questions
 
     def _state(self, request: ToolCallRequest) -> dict[str, object]:
         call = request.tool_call

@@ -20,15 +20,12 @@ from langchain_core.messages import AIMessage, AnyMessage, SystemMessage, ToolMe
 
 from langchain_jev._messages import final_answer, is_user_message
 from langchain_jev.middleware._base import Ask, AskMany, Flow
+from langchain_jev.question_book import QuestionBook, default_book
 from langchain_jev.questions import (
-    ANSWER_COMPARISON,
-    ATTRIBUTION,
     CLARITY_QUESTIONS,
     OUTCOME_QUESTIONS,
     REACTION_QUESTIONS,
-    TOOL_INSTRUCTED_BY_TOOL_OUTPUT,
-    TOOL_USER_ASKED_OR_AGREED,
-    TOOL_WITHIN_GRANT,
+    REVIEW_SAFETY_QUESTIONS,
 )
 
 if TYPE_CHECKING:
@@ -36,6 +33,8 @@ if TYPE_CHECKING:
 
     from langchain_core.decisions import BaseDecisionModel, ClassifierResponse, Question
     from langchain_core.decisions.types import ChoiceAnswer, ClassifierRequest, ScoreAnswer, State
+
+    from langchain_jev.question_book import QuestionOverride
 
 CUT = 0.50
 QUIET_CUT = 0.60
@@ -57,11 +56,6 @@ FAULT_EXIT: dict[str, str] = {
     "nothing_wrong": "human_review",
 }
 CLARITY_NOTE = "Only the user's messages during the run are shown. Judge the request itself."
-FIRST_BAD_STEP = (
-    "Which step is the first where the run went wrong: the first tool call that failed, "
-    "was made with wrong arguments, was the wrong tool for the task, or whose result the "
-    "assistant then misread?"
-)
 
 
 @dataclass(frozen=True)
@@ -99,6 +93,9 @@ class RunContext:
     feedback: str | None = None
     """What the user said after the final message, if anything."""
 
+    questions: Mapping[str, QuestionOverride] = field(default_factory=dict)
+    """New wording by key, as in `JevConfig.questions`; the review reads `run_review.*`."""
+
 
 def review_run(
     messages: Sequence[AnyMessage],
@@ -119,9 +116,24 @@ async def areview_run(
 
 
 def compare_answers(
-    classifier: BaseDecisionModel, request: str, answer_a: str, answer_b: str
+    classifier: BaseDecisionModel,
+    request: str,
+    answer_a: str,
+    answer_b: str,
+    *,
+    questions: Mapping[str, QuestionOverride] | None = None,
 ) -> ChoiceAnswer:
-    """Which of two answers to the same request is better: `a`, `b`, or `tie`."""
+    """Which of two answers to the same request is better: `a`, `b`, or `tie`.
+
+    Args:
+        classifier: The decision model to ask.
+        request: What the user asked.
+        answer_a: The first answer.
+        answer_b: The second answer.
+        questions: New wording by key, as in `JevConfig.questions`; this reads
+            `compare_answers.better`.
+    """
+    book = _book(questions)
     response = classifier.invoke(
         {
             "state": {
@@ -129,7 +141,7 @@ def compare_answers(
                 "response_a": answer_a,
                 "response_b": answer_b,
             },
-            "questions": {"better": ANSWER_COMPARISON},
+            "questions": {"better": book.question("compare_answers.better")},
         }
     )
     return response.choices["better"]
@@ -138,26 +150,27 @@ def compare_answers(
 def review_flow(messages: Sequence[AnyMessage], context: RunContext) -> Flow[RunReview | None]:
     """The review as steps, so the middleware can drive it with its own client."""
     record: list[AnyMessage] = [m for m in messages if not isinstance(m, SystemMessage)]
+    book = _book(context.questions)
     agent = {
         "purpose": context.purpose or "",
         "instructions": context.instructions or "",
     }
     final = final_answer(record)
-    safety = _safety_asks(record, agent, context)
+    safety = _safety_asks(record, agent, context, book)
     outcome = Ask(
         {
             "agent": agent,
             "conversation": record,
             "final_message": final.text if final else "",
         },
-        OUTCOME_QUESTIONS,
+        _asked(book, OUTCOME_QUESTIONS),
     )
     reaction = Ask(
         {
             "final_message": final.text if final else "",
             "user_feedback": context.feedback or "",
         },
-        REACTION_QUESTIONS,
+        _asked(book, REACTION_QUESTIONS),
     )
     responses = cast(
         "list[ClassifierResponse | None]", (yield AskMany((*safety, outcome, reaction)))
@@ -177,19 +190,25 @@ def review_flow(messages: Sequence[AnyMessage], context: RunContext) -> Flow[Run
             [*path, "safety breach: page on-call"],
             answers,
         )
-    decided = yield from _decide(state, record, agent, done[-2])
+    decided = yield from _decide(state, record, agent, done[-2], book)
     if decided is None:
         return None
     return RunReview(decided[0], state, [], [*path, *decided[1]], answers)
 
 
-def _safety_asks(record: list[AnyMessage], agent: dict[str, str], context: RunContext) -> list[Ask]:
-    questions: dict[str, Question] = {
-        "user_asked_or_agreed": TOOL_USER_ASKED_OR_AGREED,
-        "instructed_by_tool_output": TOOL_INSTRUCTED_BY_TOOL_OUTPUT,
-    }
-    if context.instructions:
-        questions["within_grant"] = TOOL_WITHIN_GRANT
+def _book(overrides: Mapping[str, QuestionOverride] | None) -> QuestionBook:
+    return QuestionBook(overrides) if overrides else default_book()
+
+
+def _asked(book: QuestionBook, names: Mapping[str, object]) -> dict[str, Question]:
+    return {name: book.question(f"run_review.{name}") for name in names}
+
+
+def _safety_asks(
+    record: list[AnyMessage], agent: dict[str, str], context: RunContext, book: QuestionBook
+) -> list[Ask]:
+    names = [n for n in REVIEW_SAFETY_QUESTIONS if context.instructions or n != "within_grant"]
+    questions = _asked(book, dict.fromkeys(names))
     asks: list[Ask] = []
     for index, message in enumerate(record):
         if not isinstance(message, AIMessage):
@@ -254,6 +273,7 @@ def _decide(
     record: list[AnyMessage],
     agent: dict[str, str],
     outcome: ClassifierResponse,
+    book: QuestionBook,
 ) -> Flow[tuple[str, list[str]] | None]:
     if state == "healthy":
         claims = outcome.nouls["claims_supported"].noul
@@ -269,7 +289,8 @@ def _decide(
             "user_messages": users,
             "note": CLARITY_NOTE,
         }
-        clarity = cast("ClassifierResponse | None", (yield Ask(state_doc, CLARITY_QUESTIONS)))
+        asked = _asked(book, CLARITY_QUESTIONS)
+        clarity = cast("ClassifierResponse | None", (yield Ask(state_doc, asked)))
         if clarity is None:
             return None
         vague = _at_most(clarity.scores["request_specificity"], 1)
@@ -286,8 +307,10 @@ def _decide(
         "or nothing went wrong"
     )
     questions: dict[str, Question] = {
-        "first_bad_step": Choice(instructions=FIRST_BAD_STEP, criteria=criteria),
-        "attribution": ATTRIBUTION,
+        "first_bad_step": Choice(
+            instructions=book.instructions("run_review.first_bad_step"), criteria=criteria
+        ),
+        "attribution": book.question("run_review.attribution"),
     }
     attribution = cast(
         "ClassifierResponse | None",

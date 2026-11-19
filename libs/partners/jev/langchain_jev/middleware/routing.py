@@ -18,7 +18,6 @@ from langchain_core.decisions.types import ChoiceAnswer
 from langchain_jev._types import CHAT_MODE, ESCALATION, MODEL_ROUTER
 from langchain_jev.middleware._base import JevMiddleware
 from langchain_jev.middleware.run import entry_answers
-from langchain_jev.questions import MODE
 from langchain_jev.switches import mode_for
 
 if TYPE_CHECKING:
@@ -51,7 +50,7 @@ class ModelRouterMiddleware(JevMiddleware):
     def entry_questions(self, snapshot: Mapping[str, Mode]) -> dict[str, Question]:  # noqa: ARG002 - one question, no parts
         """The routing Choice."""
         criteria = {name: choice.criteria for name, choice in self.settings.choices.items()}
-        return {"model_route": Choice(instructions=self.settings.instructions, criteria=criteria)}
+        return {"model_route": Choice(instructions=self.instructions("route"), criteria=criteria)}
 
     def wrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
@@ -97,7 +96,7 @@ class ChatModeMiddleware(JevMiddleware):
 
     def entry_questions(self, snapshot: Mapping[str, Mode]) -> dict[str, Question]:  # noqa: ARG002 - one question, no parts
         """The chat-or-agent Choice."""
-        return {"mode": MODE}
+        return {"mode": self.question("mode")}
 
     def wrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]

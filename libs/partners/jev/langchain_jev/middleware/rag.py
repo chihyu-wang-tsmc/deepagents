@@ -90,7 +90,8 @@ class RagPassagesMiddleware(JevMiddleware):
             request.tool_call["args"].get(self.settings.query_arg)
             or latest_request(request.state.get("messages", []))
         )
-        asks = tuple(Ask(self._state(query, p), PASSAGE_QUESTIONS) for p in passages)
+        questions = {key: self.question(key) for key in PASSAGE_QUESTIONS}
+        asks = tuple(Ask(self._state(query, p), questions) for p in passages)
         responses = cast("list[ClassifierResponse | None]", (yield AskMany(asks)))
         routed = self._route(passages, responses)
         self.record(mode, "classified", tool=name, **_counts(routed))

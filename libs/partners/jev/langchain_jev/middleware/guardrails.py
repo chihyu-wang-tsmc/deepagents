@@ -28,7 +28,6 @@ from langchain_jev.questions import (
     INPUT_BATTERY,
     OUTPUT_BATTERY,
     PRECEDENCE,
-    SEVERITY,
     TOOL_RESULT_QUESTIONS,
 )
 from langchain_jev.switches import mode_for
@@ -103,8 +102,8 @@ class InputGuardMiddleware(_Guard):
         """One Noul per enabled hazard and the severity Score."""
         hazards = self._hazards(snapshot, self.jev.config.guard.input_hazards)
         return {
-            **{f"hazard.{h}": INPUT_BATTERY[h] for h in hazards},
-            "severity": SEVERITY,
+            **{f"hazard.{h}": self.question(h) for h in hazards},
+            "severity": self.question("severity"),
         }
 
     @hook_config(can_jump_to=["end"])
@@ -188,7 +187,8 @@ class ToolResultGuardMiddleware(JevMiddleware):
         if mode == "off" or not fresh:
             return None
         request = clip(latest_request(state["messages"]), 2_000)
-        asks = tuple(Ask(self._state(request, m), TOOL_RESULT_QUESTIONS) for m in fresh)
+        questions = {name: self.question(name) for name in TOOL_RESULT_QUESTIONS}
+        asks = tuple(Ask(self._state(request, m), questions) for m in fresh)
         responses = cast("list[ClassifierResponse | None]", (yield AskMany(asks)))
         flagged = self._flagged(mode, fresh, responses)
         if mode != "on" or not flagged:
@@ -279,8 +279,8 @@ class OutputGuardMiddleware(_Guard):
         snapshot = cast("Mapping[str, Mode]", state.get("jev_modes") or {})
         hazards = self._hazards(snapshot, self.jev.config.guard.output_hazards)
         questions = {
-            **{f"hazard.{h}": OUTPUT_BATTERY[h] for h in hazards},
-            "severity": SEVERITY,
+            **{f"hazard.{h}": self.question(h) for h in hazards},
+            "severity": self.question("severity"),
         }
         response = cast(
             "ClassifierResponse | None",

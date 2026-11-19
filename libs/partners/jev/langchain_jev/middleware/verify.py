@@ -44,7 +44,6 @@ from langchain_jev.middleware.guardrails import JEV_MARK
 from langchain_jev.questions import (
     CHECK_QUESTIONS,
     CITATION_INSTRUCTIONS,
-    CITATION_RELATION,
     DEFAULT_SCORES,
     RELATION_TO_VERDICT,
 )
@@ -52,7 +51,7 @@ from langchain_jev.switches import mode_for
 
 if TYPE_CHECKING:
     from langchain.agents.middleware.types import ModelRequest, ModelResponse
-    from langchain_core.decisions import ClassifierResponse
+    from langchain_core.decisions import ClassifierResponse, Score
     from langgraph.runtime import Runtime
 
     from langchain_jev._types import Mode
@@ -167,7 +166,7 @@ class AnswerCheckMiddleware(JevMiddleware):
                 "paragraphs": paragraphs,
                 "candidate_response": answer,
             },
-            CHECK_QUESTIONS,
+            {key: self.question(key) for key in CHECK_QUESTIONS},
         )
         limit = self.threshold("verify_answer.review_at")
 
@@ -191,7 +190,7 @@ class AnswerCheckMiddleware(JevMiddleware):
         asks = tuple(
             Ask(
                 {"claim": claim, "section": clip(text, self.jev.max_chars())},
-                {"relation": CITATION_RELATION},
+                {"relation": self.jev.questions.question("citation_check.relation")},
             )
             for claim, _, quote, text in located
             if text is not None and _normalize(quote) in _normalize(text)
@@ -215,8 +214,10 @@ class AnswerCheckMiddleware(JevMiddleware):
         return _Check(CITATION_CHECK, asks, evaluate)
 
     def _scoring(self, request: str, answer: str) -> _Check:
+        book = self.jev.questions
         specs = self.jev.config.verify.scores or {
-            k: ScoreSpec(q) for k, q in DEFAULT_SCORES.items()
+            key: ScoreSpec(cast("Score", book.question(f"answer_scoring.{key}")))
+            for key in DEFAULT_SCORES
         }
         ask = Ask(
             {"request": request, "response": answer},

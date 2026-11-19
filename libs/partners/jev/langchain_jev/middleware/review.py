@@ -46,6 +46,7 @@ class RunReviewMiddleware(JevMiddleware):
         context = RunContext(
             irreversible_tools=settings.irreversible_tools,
             instructions=settings.agent_instructions,
+            questions=self.jev.config.questions,
         )
         review = yield from review_flow(messages, context)
         if review is None:

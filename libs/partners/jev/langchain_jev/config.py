@@ -23,6 +23,7 @@ from langchain_jev._types import (
     JevEvent,
     Mode,
 )
+from langchain_jev.question_book import QuestionBook
 from langchain_jev.questions import (
     INPUT_BATTERY,
     MODEL_ROUTE_INSTRUCTIONS,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from langchain_jev.fast_routes import FastRoute
     from langchain_jev.memory_store import JevMemoryStore
     from langchain_jev.models import JevModel
+    from langchain_jev.question_book import QuestionOverride
     from langchain_jev.review import RunReview
     from langchain_jev.switches import ModeSource
 
@@ -241,6 +243,15 @@ class JevConfig:
 
     context_key: str = "jev_modes"
     thresholds: Mapping[str, float] = field(default_factory=dict)
+    questions: Mapping[str, QuestionOverride] = field(default_factory=dict)
+    """New wording for any scenario's question, by key such as `input_guard.jailbreak`.
+
+    A string replaces the instructions and keeps the yes/no or option descriptions; a
+    `Noul`, `Choice`, or `Score` replaces the whole question. `default_questions()`
+    lists every key with its default wording. The thresholds were tuned on the default
+    wording, so check them on your own data after rewording a question.
+    """
+
     fail_closed: frozenset[str] = frozenset({INPUT_GUARD, OUTPUT_GUARD, TOOL_GATE})
     """Blueprints that refuse, rather than allow, when Jev cannot be reached."""
 
@@ -326,6 +337,27 @@ class JevConfig:
             msg = f"`models` names unknown blueprints: {', '.join(unknown_models)}"
             raise ValueError(msg)
         self._check_router()
+        self._check_questions()
+
+    def _check_questions(self) -> None:
+        QuestionBook(self.questions)
+        custom_route = (
+            self.router is not None and self.router.instructions != MODEL_ROUTE_INSTRUCTIONS
+        )
+        if custom_route and "model_router.route" in self.questions:
+            msg = (
+                "Set the routing question in one place: `questions['model_router.route']` "
+                "or `RouterSettings.instructions`."
+            )
+            raise ValueError(msg)
+        if self.verify.scores is not None and any(
+            key.startswith("answer_scoring.") for key in self.questions
+        ):
+            msg = (
+                "`answer_scoring.*` questions reword the default scores; with "
+                "`VerifySettings.scores`, put the wording in each `ScoreSpec`."
+            )
+            raise ValueError(msg)
 
     def _check_router(self) -> None:
         if self.router is None:

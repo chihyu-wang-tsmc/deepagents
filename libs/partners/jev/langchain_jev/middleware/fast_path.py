@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from langchain_jev._messages import latest_request
 from langchain_jev._types import FAST_PATH
-from langchain_jev.fast_routes import CallFunction, FastAction, HandOff, Reply
+from langchain_jev.fast_routes import CallFunction, FastAction, FunctionRoute, HandOff, Reply
 from langchain_jev.middleware._base import JevMiddleware
 from langchain_jev.middleware.guardrails import JEV_MARK
 from langchain_jev.middleware.run import entry_answers
@@ -47,8 +47,13 @@ class FastPathMiddleware(JevMiddleware):
         return {
             f"{route.name}::{qid}": q
             for route in self.routes
-            for qid, q in route.questions().items()
+            for qid, q in self._route_questions(route).items()
         }
+
+    def _route_questions(self, route: FastRoute) -> dict[str, Question]:
+        if isinstance(route, FunctionRoute):
+            return route.questions(self.jev.questions)
+        return route.questions()
 
     @hook_config(can_jump_to=["end"])
     def before_agent(self, state: JevState, runtime: Runtime) -> dict[str, object] | None:

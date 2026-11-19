@@ -42,6 +42,8 @@ from langchain_jev.models import (
     list_jev_models,
     register_jev_model,
 )
+from langchain_jev.question_book import QuestionOverride, default_questions
+from langchain_jev.questions import noul
 from langchain_jev.review import (
     RunContext,
     RunReview,
@@ -78,6 +80,7 @@ __all__ = [
     "MemorySettings",
     "Mode",
     "ModeSource",
+    "QuestionOverride",
     "RagSettings",
     "Reply",
     "ReviewSettings",
@@ -93,9 +96,11 @@ __all__ = [
     "VerifySettings",
     "areview_run",
     "compare_answers",
+    "default_questions",
     "get_jev_model",
     "jev_middleware",
     "list_jev_models",
+    "noul",
     "register_jev_model",
     "register_jev_profile",
     "review_run",

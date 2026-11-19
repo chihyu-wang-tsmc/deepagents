@@ -80,6 +80,14 @@ class JevMiddleware(AgentMiddleware[JevState]):
         """A threshold by full name, for example `rag_passages.relevant_min`."""
         return self.jev.thresholds[name]
 
+    def question(self, name: str, /, **values: str) -> Question:
+        """This blueprint's question `name`, with any wording from `JevConfig.questions`."""
+        return self.jev.questions.question(f"{self.blueprint}.{name}", **values)
+
+    def instructions(self, name: str) -> str:
+        """Instructions for this blueprint's choice `name`, whose options come at run time."""
+        return self.jev.questions.instructions(f"{self.blueprint}.{name}")
+
     def record(self, mode: Mode, action: str, **details: object) -> None:
         """Report a decision (or, in shadow mode, the decision it would have made)."""
         self.jev.emit(JevEvent(self.blueprint, mode, action, dict(details)))

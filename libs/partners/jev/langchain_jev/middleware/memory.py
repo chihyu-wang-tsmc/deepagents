@@ -19,7 +19,6 @@ from langchain_jev._types import MEMORY_READ, MEMORY_WRITE
 from langchain_jev.memory_store import GraphStoreMemory, JevMemoryStore
 from langchain_jev.middleware._base import Ask, AskMany, Flow, JevMiddleware
 from langchain_jev.middleware.guardrails import JEV_MARK
-from langchain_jev.questions import MEMORY_RELEVANT, REMEMBER
 
 if TYPE_CHECKING:
     from langchain.agents.middleware.types import ModelRequest, ModelResponse
@@ -82,7 +81,7 @@ class MemoryReadMiddleware(_Memory):
         asks = tuple(
             Ask(
                 {"request": request, "memory": r.get("message", "")},
-                {"relevant": MEMORY_RELEVANT},
+                {"relevant": self.question("relevant")},
             )
             for r in records
         )
@@ -141,7 +140,8 @@ class MemoryWriteMiddleware(_Memory):
             "request": {"message": clip(request, self.jev.max_chars())},
             "assistant_reply": clip(reply.text if reply else "", 2_000),
         }
-        response = cast("ClassifierResponse | None", (yield Ask(record, {"remember": REMEMBER})))
+        asked = {"remember": self.question("remember")}
+        response = cast("ClassifierResponse | None", (yield Ask(record, asked)))
         if response is None:
             return None
         probability = response.nouls["remember"].noul

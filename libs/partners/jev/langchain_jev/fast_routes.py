@@ -19,12 +19,15 @@ import types
 import typing
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from langchain_core.decisions import Choice, Noul, Question
 from langchain_core.decisions.types import Answer, ChoiceAnswer, NoulAnswer
 
-from langchain_jev.questions import FUNCTION_ROUTE_INSTRUCTIONS, functions_fit_question
+from langchain_jev.question_book import default_book
+
+if TYPE_CHECKING:
+    from langchain_jev.question_book import QuestionBook
 
 Shape = Literal["choice", "set", "flag"]
 JsonArg = str | bool | list[str] | None
@@ -118,15 +121,25 @@ class FunctionRoute:
         shapes = {name: closed_sets(fn) for name, fn in self.functions.items()}
         object.__setattr__(self, "shapes", shapes)
 
-    def questions(self) -> dict[str, Question]:
-        """The function choice, the companion Noul, and one question per argument."""
+    def questions(self, book: QuestionBook | None = None) -> dict[str, Question]:
+        """The function choice, the companion Noul, and one question per argument.
+
+        Args:
+            book: Wording from `JevConfig.questions`; a `question` in `spec` still
+                wins for this route's function choice.
+        """
+        book = book or default_book()
         described = _spec_functions(self.spec)
+        which = self.spec.get("question")
+        instructions = str(which) if which is not None else book.instructions("fast_path.which")
         questions: dict[str, Question] = {
             "__tool__": Choice(
-                instructions=str(self.spec.get("question", FUNCTION_ROUTE_INSTRUCTIONS)),
+                instructions=instructions,
                 criteria={name: described[name]["description"] for name in self.functions},
             ),
-            "__fits__": functions_fit_question(list(self.functions)),
+            "__fits__": book.question(
+                "fast_path.functions_fit", functions=", ".join(self.functions)
+            ),
         }
         for name, shapes in self.shapes.items():
             arguments = described[name].get("arguments", {})

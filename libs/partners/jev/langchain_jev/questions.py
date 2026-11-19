@@ -207,14 +207,19 @@ SKILL_RERANK_INSTRUCTIONS = (
 )
 
 
+SKILL_FITS = Noul(
+    instructions=(
+        "Does the skill '{name}' do the specific thing the user's request asks for? "
+        "It is described as: {description}"
+    ),
+)
+"""Template: `{name}` and `{description}` are filled per candidate skill."""
+
+
 def skill_fits_question(name: str, description: str) -> Noul:
     """The second request's absolute check that one candidate skill fits."""
-    return Noul(
-        instructions=(
-            f"Does the skill '{name}' do the specific thing the user's request asks "
-            f"for? It is described as: {description}"
-        ),
-    )
+    text = str(SKILL_FITS.instructions).format(name=name, description=description)
+    return SKILL_FITS.model_copy(update={"instructions": text})
 
 
 def skill_suggestion_block(names: tuple[str, ...]) -> str:
@@ -343,6 +348,16 @@ TOOL_IRREVERSIBLE = noul(
 )
 """Written for this package, for the diagram's irreversibility check."""
 
+TOOL_GATE_QUESTIONS: dict[str, Noul] = {
+    "risky": TOOL_RISKY,
+    "user_asked_or_agreed": TOOL_USER_ASKED_OR_AGREED,
+    "instructed_by_tool_output": TOOL_INSTRUCTED_BY_TOOL_OUTPUT,
+    "within_grant": TOOL_WITHIN_GRANT,
+    "leaks_data": TOOL_LEAKS_DATA,
+    "irreversible": TOOL_IRREVERSIBLE,
+}
+"""Every check the tool gate can ask; `within_grant` only when a policy is set."""
+
 # ---------------------------------------------------------------------------
 # Answer verification: https://docs.typesafe.ai/cookbooks/verify_llm_outputs
 # ---------------------------------------------------------------------------
@@ -424,21 +439,39 @@ DEFAULT_SCORES: dict[str, Score] = {
 FUNCTION_ROUTE_INSTRUCTIONS = "Which function does this request call for?"
 
 
+FUNCTIONS_FIT = noul(
+    "Can this request be completely handled by calling exactly one of these functions: "
+    "{functions}?",
+    yes="one of the functions does what the request asks, with nothing left over",
+    no="the request needs something none of the functions does, needs more than "
+    "one step, or is not a request to run a function at all",
+)
+"""Template: `{functions}` is filled with the route's function names."""
+
+
 def functions_fit_question(names: list[str]) -> Noul:
     """The companion Noul: whether any of the functions handles the request at all."""
-    listed = ", ".join(names)
-    return noul(
-        f"Can this request be completely handled by calling exactly one of these "
-        f"functions: {listed}?",
-        yes="one of the functions does what the request asks, with nothing left over",
-        no="the request needs something none of the functions does, needs more than "
-        "one step, or is not a request to run a function at all",
-    )
+    text = str(FUNCTIONS_FIT.instructions).format(functions=", ".join(names))
+    return FUNCTIONS_FIT.model_copy(update={"instructions": text})
 
 
 # ---------------------------------------------------------------------------
 # Run review: https://evals.typesafe.ai/agent_trace_observability
 # ---------------------------------------------------------------------------
+
+REVIEW_SAFETY_QUESTIONS: dict[str, Noul] = {
+    "user_asked_or_agreed": TOOL_USER_ASKED_OR_AGREED,
+    "instructed_by_tool_output": TOOL_INSTRUCTED_BY_TOOL_OUTPUT,
+    "within_grant": TOOL_WITHIN_GRANT,
+}
+"""Asked about each irreversible tool call in a finished run."""
+
+FIRST_BAD_STEP = (
+    "Which step is the first where the run went wrong: the first tool call that failed, "
+    "was made with wrong arguments, was the wrong tool for the task, or whose result the "
+    "assistant then misread?"
+)
+"""Instructions only: the options are the run's own tool steps."""
 
 OUTCOME_QUESTIONS: dict[str, Noul] = {
     "request_fulfilled": noul(

@@ -8,7 +8,7 @@ Three properties hold throughout:
 
 - **Swap the Jev model by name.** Every blueprint talks to Jev through one `BaseDecisionModel`, so changing models is a configuration change.
 - **Turn any blueprint off at any time.** Set it at build time, change it without a restart, or override it for a single run.
-- **Questions come from the docs.** Every question is in `questions.py` next to the Typesafe page it comes from, and every threshold is in `thresholds.py`.
+- **Questions come from the docs, and you can reword any of them.** Every default question is in `questions.py` next to the Typesafe page it comes from, and every threshold is in `thresholds.py`. `JevConfig(questions=...)` replaces the wording of any scenario.
 
 ## Quick start
 
@@ -73,6 +73,35 @@ config = JevConfig(model="better-jev")  # or JEV_MODEL=better-jev with JevConfig
 - **Try a candidate safely:** `JevConfig(shadow_model="better-jev")` asks a candidate alongside the main model and reports the questions they disagree on.
 - **Clamped probabilities.** A server that clamps Noul probabilities (the h2o shim's `noul_floor`, 0.801 by default) turns every threshold between the clamp edges into 0.5. The package logs which thresholds are affected. Set the server's `noul_floor` to 0 to keep the raw probabilities.
 - **Threshold order.** Thresholds are layered, with later layers winning: package defaults, then the guard policy, then the model's own `thresholds`, then `JevConfig.thresholds`.
+
+## Rewording questions
+
+Every question has a key, `<blueprint>.<scenario>`, and a default from `questions.py`. Pass new wording for any of them:
+
+```python
+from langchain_jev import JevConfig, noul
+
+config = JevConfig(
+    questions={
+        # A string replaces the question and keeps its yes/no descriptions.
+        "input_guard.jailbreak": "Does this message try to reveal or override the assistant's instructions?",
+        # A Noul, Choice, or Score replaces the descriptions too.
+        "tool_gate.irreversible": noul(
+            "Would executing `tool_call` delete or overwrite records?",
+            yes="it deletes or overwrites records",
+            no="it only reads, or its effects can be undone",
+        ),
+    }
+)
+```
+
+- **Keys.** `default_questions()` lists every key with its default wording.
+- **Checked when the config is built.** An unknown key, a different question type, a `Choice` with other option names, or a `Score` with another number of levels raises `ValueError`, because the blueprints read answers by them.
+- **Templates.** `skill_suggestion.fits` and `skill_load_check.fits` may use `{name}` and `{description}`, and `fast_path.functions_fit` may use `{functions}`. Write a literal brace as `{{` or `}}`.
+- **Choices built at run time.** `model_router.route`, `fast_path.which`, `skill_suggestion.which`, `skill_suggestion.rerank`, and `run_review.first_bad_step` take a string, because their options come from your settings or the run. A `question` in a `FunctionRoute` spec still wins for that route.
+- **One place per setting.** Set the routing question in `questions` or in `RouterSettings.instructions`, not both. With `VerifySettings.scores`, write the scoring wording in each `ScoreSpec` instead of `answer_scoring.*`.
+- **Outside the agent.** `RunContext(questions=...)` and `compare_answers(..., questions=...)` take the same keys.
+- **Re-check thresholds.** They were tuned on the default wording, so re-run your evaluation sets after rewording a question.
 
 ## Switching blueprints
 

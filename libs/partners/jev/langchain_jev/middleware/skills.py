@@ -26,11 +26,7 @@ from langchain_jev.middleware._base import Ask, AskMany, Flow, Handle, JevMiddle
 from langchain_jev.middleware.guardrails import JEV_MARK
 from langchain_jev.questions import (
     SKILL_ACTION_QUESTIONS,
-    SKILL_CHOICE_INSTRUCTIONS,
     SKILL_INVERTED,
-    SKILL_NAMED_QUESTION,
-    SKILL_RERANK_INSTRUCTIONS,
-    skill_fits_question,
     skill_suggestion_block,
 )
 from langchain_jev.switches import mode_for
@@ -111,11 +107,11 @@ class SkillSuggestionMiddleware(JevMiddleware):
     def _wide(self, group: list[dict], *, first: bool) -> dict[str, Question]:
         criteria = {skill["name"]: skill["description"] for skill in group}
         questions: dict[str, Question] = {
-            "which": Choice(instructions=SKILL_CHOICE_INSTRUCTIONS, criteria=criteria)
+            "which": Choice(instructions=self.instructions("which"), criteria=criteria)
         }
         if first:
-            questions.update({f"gate::{k}": q for k, q in SKILL_ACTION_QUESTIONS.items()})
-            questions["named"] = SKILL_NAMED_QUESTION
+            questions.update({f"gate::{k}": self.question(k) for k in SKILL_ACTION_QUESTIONS})
+            questions["named"] = self.question("named")
         return questions
 
     def _needs_skill(self, response: ClassifierResponse) -> bool:
@@ -140,10 +136,11 @@ class SkillSuggestionMiddleware(JevMiddleware):
             for name in shortlist
         }
         questions: dict[str, Question] = {
-            "which": Choice(instructions=SKILL_RERANK_INSTRUCTIONS, criteria=criteria)
+            "which": Choice(instructions=self.instructions("rerank"), criteria=criteria)
         }
         for name in shortlist:
-            questions[f"fits::{name}"] = skill_fits_question(name, by_name[name]["description"])
+            description = by_name[name]["description"]
+            questions[f"fits::{name}"] = self.question("fits", name=name, description=description)
         response = cast("ClassifierResponse | None", (yield Ask(_skill_state(request), questions)))
         if response is None:
             return None, 0.0
@@ -239,7 +236,9 @@ class SkillLoadCheckMiddleware(JevMiddleware):
         if skill is None or mode == "off":
             return cast("ToolMessage | Command", (yield Handle(request)))
         text = latest_request(request.state.get("messages", []))
-        question = {"fits": skill_fits_question(skill["name"], skill["description"])}
+        question = {
+            "fits": self.question("fits", name=skill["name"], description=skill["description"])
+        }
         response = cast("ClassifierResponse | None", (yield Ask(_skill_state(text), question)))
         fits = response.nouls["fits"].noul if response is not None else 1.0
         poor = fits < self.threshold("skill_load_check.min_fits")

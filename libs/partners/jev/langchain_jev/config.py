@@ -9,6 +9,7 @@ from langchain_jev._types import (
     BLUEPRINTS,
     CHAT_MODE,
     CITATION_CHECK,
+    CODING_ROUTER,
     DEPENDENCIES,
     ESCALATION,
     FAST_PATH,
@@ -25,6 +26,7 @@ from langchain_jev._types import (
 )
 from langchain_jev.question_book import QuestionBook
 from langchain_jev.questions import (
+    DEFAULT_ROUTE_CRITERIA,
     INPUT_BATTERY,
     MODEL_ROUTE_INSTRUCTIONS,
     OUTPUT_BATTERY,
@@ -90,7 +92,9 @@ class RouteChoice:
     """One model the router may pick, and when to pick it."""
 
     model: str | BaseChatModel
-    criteria: str
+    criteria: str | None = None
+    """When to pick this model. Choices named `fast` or `powerful` may leave it out to
+    use the descriptions measured in open-source-jev."""
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,21 @@ class RouterSettings:
 
     escalate_to: str | None = None
     """Choice used after an answer fails verification (the `escalation` blueprint)."""
+
+    def criteria(self) -> dict[str, str]:
+        """Each choice's description, with the measured wording where none is given."""
+        return {
+            name: choice.criteria or DEFAULT_ROUTE_CRITERIA[name]
+            for name, choice in self.choices.items()
+        }
+
+
+@dataclass(frozen=True)
+class CodingSettings:
+    """The coding model for the `coding_router` blueprint."""
+
+    model: str | BaseChatModel
+    """Model for requests whose answer needs code, such as a `provider:model` string."""
 
 
 @dataclass(frozen=True)
@@ -274,6 +293,9 @@ class JevConfig:
     cache_size: int = 512
     guard: GuardSettings = field(default_factory=GuardSettings)
     router: RouterSettings | None = None
+    coding: CodingSettings | None = None
+    """Required for `coding_router`, which sends requests that need code to this model."""
+
     fast_path: FastPathSettings | None = None
     skills: SkillSettings = field(default_factory=SkillSettings)
     rag: RagSettings | None = None
@@ -324,6 +346,7 @@ class JevConfig:
     def _missing_setting(self, blueprint: str) -> str | None:
         needs: dict[str, tuple[bool, str]] = {
             MODEL_ROUTER: (self.router is None, "`router` settings"),
+            CODING_ROUTER: (self.coding is None, "`coding` settings naming the coding model"),
             ESCALATION: (
                 self.router is None or self.router.escalate_to is None,
                 "`router.escalate_to`",
@@ -385,3 +408,19 @@ class JevConfig:
             if choice is not None and choice not in names:
                 msg = f"`router.{label}` must be one of {sorted(names)}, got {choice!r}."
                 raise ValueError(msg)
+        self._check_route_criteria()
+
+    def _check_route_criteria(self) -> None:
+        if self.router is None:
+            return
+        bare = sorted(
+            name
+            for name, choice in self.router.choices.items()
+            if not choice.criteria and name not in DEFAULT_ROUTE_CRITERIA
+        )
+        if bare:
+            msg = (
+                f"`RouteChoice` needs `criteria` for {', '.join(bare)}; only choices named "
+                f"{' and '.join(sorted(DEFAULT_ROUTE_CRITERIA))} have default descriptions."
+            )
+            raise ValueError(msg)

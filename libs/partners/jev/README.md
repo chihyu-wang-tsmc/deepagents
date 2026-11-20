@@ -36,7 +36,8 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `input_guard` | Before the LLM sees the user's message | entry request, `before_agent` | [Guardrails](https://docs.typesafe.ai/cookbooks/llm_guardrails) |
 | `tool_result_guard` | Tool results, before the LLM reads them | `before_model` | [RAG passages](https://docs.typesafe.ai/cookbooks/classifying_rag_passages) (injection) |
 | `model_router` | Picks the model for each call | entry request, `wrap_model_call` | [LangChain integration](https://docs.langchain.com/oss/python/integrations/providers/typesafe) |
-| `chat_mode` (opt-in) | Drops tools when one reply answers the request | entry request, `wrap_model_call` | open-source-jev mode question |
+| `coding_router` | Sends requests whose answer needs code to the coding model | entry request, `wrap_model_call` | open-source-jev coding question |
+| `chat_mode` | Drops tools when one reply answers the request | entry request, `wrap_model_call` | open-source-jev mode question |
 | `fast_path` | Answers simple requests without the LLM | entry request, `before_agent` | [Function calling](https://docs.typesafe.ai/cookbooks/function_calling), [companion Noul](https://docs.typesafe.ai/patterns/companion-noul) |
 | `skill_suggestion` | Hints at one skill per turn | `before_model`, `wrap_model_call` | [Skill suggestion](https://docs.typesafe.ai/cookbooks/skill_suggestion) |
 | `skill_pinning` | Loads the winning `SKILL.md` directly | `pinned_skills` | deepagents `SkillsMiddleware` |
@@ -51,7 +52,20 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `escalation` | Retries a failed answer on the stronger model | `after_agent` → `wrap_model_call` | [SDE cascade](https://docs.typesafe.ai/cookbooks/sde_cascade) |
 | `run_review` | Hands finished runs to the trace review | `after_agent`, `review_run()` | [Agent trace observability](https://evals.typesafe.ai/agent_trace_observability) |
 
-Questions about the user's message share one Jev request. This covers the guards, routing, chat mode, and fast-path routes, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing and escalation, `fast_path` routes, `rag` retrieval tools, and `review` callbacks.
+Questions about the user's message share one Jev request. This covers the guards, routing, the coding check, chat mode, and fast-path routes, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing and escalation, `coding` for the coding model, `fast_path` routes, `rag` retrieval tools, and `review` callbacks.
+
+```python
+from langchain_jev import CodingSettings, JevConfig, RouteChoice, RouterSettings
+
+config = JevConfig(
+    blueprints={"model_router": "on", "coding_router": "on"},
+    # Choices named fast and powerful may leave out criteria: they use the descriptions measured in open-source-jev.
+    router=RouterSettings(choices={"fast": RouteChoice("openai:<fast model>"), "powerful": RouteChoice("openai:<strong model>")}),
+    coding=CodingSettings(model="openai:<coding model>"),
+)
+```
+
+When Jev says a good answer needs code (P ≥ 0.5, the cut open-source-jev uses), the coding model takes the call instead of the routed one. A retry after a failed verification still goes to `RouterSettings.escalate_to`.
 
 ## Swapping the Jev model
 

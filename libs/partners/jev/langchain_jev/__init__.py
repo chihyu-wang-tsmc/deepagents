@@ -11,6 +11,7 @@ from langchain_jev._runtime import JevRuntime
 from langchain_jev._types import BLUEPRINTS, JevEvent, Mode
 from langchain_jev.classifiers import JevClassifierError, SystemOneClassifier
 from langchain_jev.config import (
+    CodingSettings,
     FastPathSettings,
     GuardSettings,
     JevConfig,
@@ -62,6 +63,7 @@ from langchain_jev.switches import (
 __all__ = [
     "BLUEPRINTS",
     "CallFunction",
+    "CodingSettings",
     "DecisionRoute",
     "EnvModeSource",
     "FastPathSettings",

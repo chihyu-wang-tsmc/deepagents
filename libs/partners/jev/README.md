@@ -102,6 +102,7 @@ config = JevConfig(
 
 - **Keys.** `default_questions()` lists every key with its default wording.
 - **Checked when the config is built.** An unknown key, a different question type, a `Choice` with other option names, or a `Score` with another number of levels raises `ValueError`, because the blueprints read answers by them.
+- **Unused rewordings warn.** A reworded question this agent can never ask is listed in a warning with the setting to change: its blueprint is off, its hazard is left out of `GuardSettings`, its check has no policy text, or reviews only go to `on_run_end`. The info line about reworded questions names only those that are asked.
 - **Templates.** `skill_suggestion.fits` and `skill_load_check.fits` may use `{name}` and `{description}`, and `fast_path.functions_fit` may use `{functions}`. Write a literal brace as `{{` or `}}`.
 - **Choices built at run time.** `model_router.route`, `fast_path.which`, `skill_suggestion.which`, `skill_suggestion.rerank`, and `run_review.first_bad_step` take a string, because their options come from your settings or the run. A `question` in a `FunctionRoute` spec still wins for that route.
 - **One place per setting.** Set the routing question in `questions` or in `RouterSettings.instructions`, not both. With `VerifySettings.scores`, write the scoring wording in each `ScoreSpec` instead of `answer_scoring.*`.

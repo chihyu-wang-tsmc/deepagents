@@ -212,6 +212,11 @@ class ReviewSettings:
     inline: bool | None = None
     """Review each run right after it ends; `None` does so whenever `on_review` is set."""
 
+    @property
+    def reviews_inline(self) -> bool:
+        """Whether each run is reviewed right after it ends."""
+        return self.on_review is not None if self.inline is None else self.inline
+
 
 @dataclass(frozen=True)
 class JevConfig:

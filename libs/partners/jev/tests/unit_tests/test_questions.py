@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,7 +13,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from langchain_jev import (
+    GuardSettings,
     JevConfig,
+    JevRuntime,
     RouteChoice,
     RouterSettings,
     RunContext,
@@ -202,3 +205,34 @@ def test_default_questions_hands_out_copies() -> None:
     again = default_questions()["input_guard.jailbreak"]
     assert isinstance(again, Noul)
     assert again.instructions == INPUT_BATTERY["jailbreak"].instructions
+
+
+def test_rewording_a_question_that_is_never_asked_warns(caplog: pytest.LogCaptureFixture) -> None:
+    config = JevConfig(
+        model=ScriptedJev(),
+        blueprints={"input_guard": "on", "tool_gate": "on"},
+        guard=GuardSettings(input_hazards=("jailbreak",)),
+        questions={
+            "input_guard.jailbreak": "Asked.",
+            "input_guard.medical_advice": "Left out of the hazards.",
+            "tool_gate.within_grant": "No policy to compare against.",
+            "memory_write.remember": "Its blueprint is off.",
+        },
+    )
+
+    with caplog.at_level(logging.INFO, logger="langchain_jev"):
+        JevRuntime(config)
+
+    warning = next(r.getMessage() for r in caplog.records if "never asked" in r.getMessage())
+    reworded = next(
+        r.getMessage() for r in caplog.records if "questions reworded" in r.getMessage()
+    )
+    assert (
+        "input_guard.medical_advice (add 'medical_advice' to GuardSettings.input_hazards)"
+        in warning
+    )
+    assert "tool_gate.within_grant (set ToolGateSettings.policy)" in warning
+    assert "memory_write.remember (turn on memory_write in JevConfig.blueprints)" in warning
+    assert "input_guard.jailbreak" not in warning
+    assert "input_guard.jailbreak" in reworded
+    assert "memory_write.remember" not in reworded

@@ -40,8 +40,7 @@ class RunReviewMiddleware(JevMiddleware):
             return None
         if mode == "on" and settings.on_run_end is not None:
             settings.on_run_end(messages)
-        inline = settings.on_review is not None if settings.inline is None else settings.inline
-        if not inline:
+        if not settings.reviews_inline:
             self.record(mode, "handed_off", messages=len(messages))
             return None
         context = RunContext(

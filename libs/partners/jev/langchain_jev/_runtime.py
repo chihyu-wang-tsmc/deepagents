@@ -10,6 +10,7 @@ import threading
 from collections import OrderedDict
 from typing import TYPE_CHECKING, cast
 
+from langchain_jev._question_use import asked_overrides, unasked_questions
 from langchain_jev._types import JevEvent, Mode
 from langchain_jev.classifiers import serialize_state
 from langchain_jev.memory_store import InMemoryJevMemory
@@ -59,19 +60,29 @@ class JevRuntime:
         self._report_setup()
 
     def _report_setup(self) -> None:
-        if not self.installed:
+        if self.installed:
+            self._warn_clamped()
+        else:
             logger.warning(
                 "No Jev blueprint is on, so Jev is never asked. Every blueprint is off "
                 "until JevConfig(blueprints={...}) turns it on, for example "
                 "blueprints={'input_guard': 'on', 'tool_gate': 'on'}."
             )
-            return
-        self._warn_clamped()
-        if self.questions.overridden:
+        self._report_questions()
+
+    def _report_questions(self) -> None:
+        unasked = unasked_questions(self.config, self.installed)
+        if unasked:
+            logger.warning(
+                "Reworded Jev questions that are never asked: %s.",
+                "; ".join(f"{key} ({fix})" for key, fix in unasked.items()),
+            )
+        asked = asked_overrides(self.config, unasked)
+        if asked:
             logger.info(
                 "Jev questions reworded: %s. Thresholds were tuned on the default "
                 "wording; check them on your own data.",
-                ", ".join(self.questions.overridden),
+                ", ".join(asked),
             )
 
     def _thresholds(self) -> dict[str, float]:

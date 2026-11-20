@@ -56,6 +56,16 @@ class JevRuntime:
         self.memory = InMemoryJevMemory()
         self._cache: OrderedDict[str, ClassifierResponse] = OrderedDict()
         self._lock = threading.Lock()
+        self._report_setup()
+
+    def _report_setup(self) -> None:
+        if not self.installed:
+            logger.warning(
+                "No Jev blueprint is on, so Jev is never asked. Every blueprint is off "
+                "until JevConfig(blueprints={...}) turns it on, for example "
+                "blueprints={'input_guard': 'on', 'tool_gate': 'on'}."
+            )
+            return
         self._warn_clamped()
         if self.questions.overridden:
             logger.info(
@@ -77,7 +87,11 @@ class JevRuntime:
     def _warn_clamped(self) -> None:
         if not self.model.noul_floor:
             return
-        affected = clamped_thresholds(self.thresholds, self.model.noul_floor)
+        affected = [
+            name
+            for name in clamped_thresholds(self.thresholds, self.model.noul_floor)
+            if name.split(".", 1)[0] in self.installed
+        ]
         if affected:
             logger.warning(
                 "Jev model %r clamps Noul probabilities at %.3f, so these thresholds "

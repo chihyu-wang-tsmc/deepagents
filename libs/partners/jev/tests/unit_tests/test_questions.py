@@ -49,7 +49,9 @@ def _sent(jev: ScriptedJev, qid: str) -> Question:
 def test_a_string_rewords_the_instructions_and_keeps_the_criteria() -> None:
     jev = ScriptedJev()
     wording = "Does this message ask to see the assistant's hidden system prompt?"
-    config = JevConfig(model=jev, questions={"input_guard.jailbreak": wording})
+    config = JevConfig(
+        model=jev, questions={"input_guard.jailbreak": wording}, blueprints={"input_guard": "on"}
+    )
 
     _run(FakeChat(responses=["Hello."]), config, "hi")
 
@@ -75,6 +77,7 @@ def test_a_whole_question_replaces_the_criteria_too() -> None:
         model=jev,
         questions={"tool_gate.irreversible": question},
         tool_gate=ToolGateSettings(tools=["archive"], ask_human=False),
+        blueprints={"tool_gate": "on"},
     )
     calls = [{"name": "archive", "args": {"path": "a.txt"}, "id": "c1"}]
     chat = FakeChat(responses=[AIMessage(content="", tool_calls=calls), "Done."])
@@ -95,6 +98,7 @@ def test_templates_and_run_time_choices_take_new_wording(tmp_path: Path) -> None
             "skill_suggestion.which": "Which skill would a careful expert open first?",
             "skill_suggestion.fits": "Is '{name}' the right skill here? {description}",
         },
+        blueprints={"skill_suggestion": "on"},
     )
 
     _run(
@@ -119,7 +123,12 @@ def test_the_routing_question_can_come_from_questions() -> None:
         choices={"fast": RouteChoice(fast, "Simple."), "powerful": RouteChoice(powerful, "Hard.")}
     )
     jev = ScriptedJev(rules={"model_route": "powerful"})
-    config = JevConfig(model=jev, router=router, questions={"model_router.route": "Fast or deep?"})
+    config = JevConfig(
+        model=jev,
+        router=router,
+        questions={"model_router.route": "Fast or deep?"},
+        blueprints={"model_router": "on"},
+    )
 
     _run(fast, config, "Prove it.")
 

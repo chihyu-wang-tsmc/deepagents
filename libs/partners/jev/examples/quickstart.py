@@ -8,6 +8,7 @@
 可選：
     JEV_MODEL      換 Jev 模型，例如 h2o-lightning-31b 或 typesafe
     JEV_MODES      不改程式就切換藍圖，例如 "input_guard=off,answer_scoring=shadow"
+                   （只能關掉或改成 shadow 下面打開的藍圖，不能打開沒列出來的）
     JEV_LIST_QUESTIONS=1  印出每個可以改寫的 Jev 問題（鍵與預設內容）後結束
 """
 
@@ -48,7 +49,26 @@ def show(event: JevEvent) -> None:
     print(f"   [jev] {event.blueprint:<17} {event.mode:<6} {event.action}")
 
 
-# 3. 自訂要問 Jev 的問題（不寫就用預設；鍵的格式是「藍圖.場景」）
+# 3. 要問 Jev 的藍圖：每個藍圖預設都是關的，只有列在這裡的才會打開
+#    "on" 照 Jev 的判斷動作；"shadow" 只記錄 Jev 的判斷，不改變結果
+#    打開的藍圖會問它全部的場景；tool_gate.within_grant 另外需要 ToolGateSettings(policy=...)
+blueprints = {
+    "input_guard": "on",  # 使用者訊息：越獄、要求停用安全規則、有害請求、醫療建議、自傷
+    "output_guard": "on",  # 最後的回覆：同樣的檢查
+    "tool_result_guard": "on",  # 工具結果裡夾帶的指令（prompt injection）
+    "tool_gate": "on",  # 工具執行前：風險、使用者是否同意、資料外洩、能不能復原
+    "memory_read": "on",  # 帶入記住的使用者事實，先問 Jev 哪些和這次有關
+    "memory_write": "on",  # 判斷這次對話裡有沒有值得記住的事實
+    "answer_scoring": "on",  # 回答的品質分數
+}
+# 其他藍圖，需要時加進上面的 blueprints：
+#   有 skills 時：skill_suggestion、skill_pinning、skill_load_check
+#   chat_mode：一則文字回覆就能回答時，不給模型工具
+#   要先給設定：model_router（router=）、escalation（router.escalate_to）、
+#     fast_path（fast_path=）、rag_passages（rag=）、run_review（review=）
+#   要有證據才有作用：verify_answer、citation_check（搭配 rag_passages 或 verify.evidence_tools）
+
+# 4. 自訂要問 Jev 的問題（不寫就用預設；鍵的格式是「藍圖.場景」）
 #    - 給字串：只換問題本身，yes/no 的說明沿用預設
 #    - 給 noul(...)（或 Choice、Score）：連 yes/no 或選項的說明一起換
 #    門檻是用英文的預設問題調出來的，改寫後請用自己的資料檢查一次門檻
@@ -67,9 +87,10 @@ questions = {
     ),
 }
 
-# 4. Jev 的設定
+# 5. Jev 的設定
 config = JevConfig(
     model="default",  # 讀 JEV_MODEL；沒設就是 h2o-lightning-4b
+    blueprints=blueprints,
     mode_source=EnvModeSource(),  # 讀 JEV_MODES，每次執行都會重讀
     questions=questions,
     guard=GuardSettings(refusal_message="抱歉，這個要求我沒辦法協助。"),
@@ -77,10 +98,10 @@ config = JevConfig(
     on_event=show,
 )
 
-# 5. 掛到所有用 OpenAI 相容模型的 deep agent 上（主 agent + 子 agent）
+# 6. 掛到所有用 OpenAI 相容模型的 deep agent 上（主 agent + 子 agent）
 register_jev_profile(["openai"], config)
 
-# 6. 照常建立 deep agent，不用另外傳 middleware
+# 7. 照常建立 deep agent，不用另外傳 middleware
 agent = create_deep_agent(model=llm)
 
 for question in [

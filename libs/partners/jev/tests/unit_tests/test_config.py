@@ -19,6 +19,7 @@ from langchain_jev import (
     RouterSettings,
     StaticModeSource,
     get_jev_model,
+    jev_middleware,
     register_jev_model,
 )
 from langchain_jev.switches import mode_for, resolve_modes
@@ -28,8 +29,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_default_config_installs_every_blueprint_that_needs_no_settings() -> None:
-    installed = JevConfig(model=ScriptedJev()).installed()
+def test_every_blueprint_is_off_until_turned_on(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING, logger="langchain_jev"):
+        stack = jev_middleware(JevConfig(model=ScriptedJev()))
+    listed = JevConfig(blueprints={"input_guard": "on", "tool_gate": "shadow"}).installed()
+
+    assert stack == []
+    assert "No Jev blueprint is on" in caplog.text
+    assert listed == {"input_guard": "on", "tool_gate": "shadow"}
+
+
+def test_default_mode_on_turns_on_every_blueprint_that_needs_no_settings() -> None:
+    installed = JevConfig(model=ScriptedJev(), default_mode="on").installed()
 
     assert "input_guard" in installed
     assert "tool_gate" in installed
@@ -51,7 +62,7 @@ def test_unknown_blueprints_and_thresholds_are_errors() -> None:
 
 
 def test_a_dependent_follows_its_dependency_unless_asked_for() -> None:
-    off = JevConfig(blueprints={"skill_suggestion": "off"}).installed()
+    off = JevConfig(default_mode="on", blueprints={"skill_suggestion": "off"}).installed()
     assert "skill_pinning" not in off
     with pytest.raises(ValueError, match="skill_pinning"):
         JevConfig(blueprints={"skill_suggestion": "off", "skill_pinning": "on"}).installed()
@@ -98,9 +109,10 @@ def test_a_clamping_server_warns_about_affected_thresholds(
     clamped = JevModel(name="clamped", factory=ScriptedJev, noul_floor=0.801)
 
     with caplog.at_level(logging.WARNING, logger="langchain_jev"):
-        JevRuntime(JevConfig(model=clamped))
+        JevRuntime(JevConfig(model=clamped, blueprints={"input_guard": "on"}))
 
-    assert "rag_passages.relevant_min" in caplog.text
+    assert "input_guard.action" in caplog.text
+    assert "rag_passages.relevant_min" not in caplog.text  # rag_passages is off
 
 
 def test_more_specific_mode_layers_win_and_cannot_add_blueprints() -> None:
@@ -150,7 +162,9 @@ def test_file_source_reloads_and_keeps_the_last_good_modes(tmp_path: Path) -> No
 def test_static_source_flips_blueprints_from_code() -> None:
     source = StaticModeSource()
     source.set("tool_gate", "shadow")
-    jev = JevRuntime(JevConfig(model=ScriptedJev(), mode_source=source))
+    jev = JevRuntime(
+        JevConfig(model=ScriptedJev(), mode_source=source, blueprints={"tool_gate": "on"})
+    )
 
     assert jev.snapshot(None)["tool_gate"] == "shadow"
     assert jev.snapshot({"jev_modes": {"tool_gate": "on"}})["tool_gate"] == "on"

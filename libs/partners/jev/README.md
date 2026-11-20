@@ -7,7 +7,7 @@ Jev reads text and returns typed answers with calibrated probabilities instead o
 Three properties hold throughout:
 
 - **Swap the Jev model by name.** Every blueprint talks to Jev through one `BaseDecisionModel`, so changing models is a configuration change.
-- **Turn any blueprint off at any time.** Set it at build time, change it without a restart, or override it for a single run.
+- **Every blueprint is opt-in.** Nothing asks Jev until `JevConfig(blueprints=...)` turns it on; a blueprint that is on asks all of its questions. Any blueprint can be switched off again at build time, without a restart, or for a single run.
 - **Questions come from the docs, and you can reword any of them.** Every default question is in `questions.py` next to the Typesafe page it comes from, and every threshold is in `thresholds.py`. `JevConfig(questions=...)` replaces the wording of any scenario.
 
 ## Quick start
@@ -18,7 +18,11 @@ from langchain_jev import JevConfig, register_jev_profile
 
 # Install the Jev stack on every deep agent whose model comes from these providers:
 # the main agent, the general-purpose subagent, and declarative subagents.
-register_jev_profile(["openai"], JevConfig(model="h2o-lightning-4b"))
+# Every blueprint is off until it is listed here.
+register_jev_profile(
+    ["openai"],
+    JevConfig(model="h2o-lightning-4b", blueprints={"input_guard": "on", "tool_gate": "on"}),
+)
 
 agent = create_deep_agent(model=chat_model, tools=tools)
 ```
@@ -47,7 +51,7 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `escalation` | Retries a failed answer on the stronger model | `after_agent` → `wrap_model_call` | [SDE cascade](https://docs.typesafe.ai/cookbooks/sde_cascade) |
 | `run_review` | Hands finished runs to the trace review | `after_agent`, `review_run()` | [Agent trace observability](https://evals.typesafe.ai/agent_trace_observability) |
 
-Questions about the user's message share one Jev request. This covers the guards, routing, chat mode, and fast-path routes, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Blueprints that need settings are only installed when those settings are given: `router` for routing and escalation, `fast_path` routes, `rag` retrieval tools, and `review` callbacks.
+Questions about the user's message share one Jev request. This covers the guards, routing, chat mode, and fast-path routes, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing and escalation, `fast_path` routes, `rag` retrieval tools, and `review` callbacks.
 
 ## Swapping the Jev model
 
@@ -82,6 +86,7 @@ Every question has a key, `<blueprint>.<scenario>`, and a default from `question
 from langchain_jev import JevConfig, noul
 
 config = JevConfig(
+    blueprints={"input_guard": "on", "tool_gate": "on"},
     questions={
         # A string replaces the question and keeps its yes/no descriptions.
         "input_guard.jailbreak": "Does this message try to reveal or override the assistant's instructions?",
@@ -105,19 +110,21 @@ config = JevConfig(
 
 ## Switching blueprints
 
-Each blueprint is `off`, `shadow` (ask Jev and record, but change nothing), or `on`.
+Each blueprint is `off`, `shadow` (ask Jev and record, but change nothing), or `on`. Every blueprint starts `off`.
 
 | Level | How | Takes effect |
 | --- | --- | --- |
-| Build | `JevConfig(blueprints={"fast_path": "off"})`; `off` leaves it out of the stack | when the agent is built |
+| Build | `JevConfig(blueprints={"input_guard": "on", "tool_gate": "shadow"})`; blueprints you do not list stay out of the stack | when the agent is built |
 | Operator | `mode_source=FileModeSource("jev_modes.json")`, `EnvModeSource()` (`JEV_MODES=tool_gate=off`), or `StaticModeSource` | next run, no restart |
 | Per run | `agent.invoke(..., context={"jev_modes": {"tool_gate": "shadow"}})` | that run |
 
 - **Precedence.** The more specific level wins. Overrides cannot enable a blueprint that was not built.
+- **Every scenario is asked.** A blueprint that is on asks Jev all of its questions: saved facts are filtered by relevance, the model is told how to cite while `citation_check` is on, and runs are reviewed as soon as `ReviewSettings.on_review` is set. Only the `within_grant` checks wait for the policy they compare against: `ToolGateSettings.policy` or `ReviewSettings.agent_instructions`.
+- **Everything at once.** `JevConfig(default_mode="on")` turns on every blueprint whose settings are given, except `chat_mode`.
 - **Parts.** A part narrows its blueprint but never widens it. For example: `input_guard.medical_advice`, `output_guard.self_harm`, `tool_gate.execute`, `tool_result_guard.<tool>`, `rag_passages.<tool>`, or `skill_load_check.<skill>`.
 - **One snapshot per run.** Modes are read once when a run starts and kept for the whole run, including after a human-in-the-loop interrupt resumes.
 - **Off means plain deepagents.** A blueprint that is off falls back to standard deepagents behavior. For example, the default model is used instead of the routed one, retrieval results pass through unchanged, and `MemoryMiddleware` keeps injecting all of `AGENTS.md`.
-- **Dependencies.** `skill_pinning` needs `skill_suggestion`, and `escalation` needs `model_router`. A dependent you did not configure is dropped along with its dependency; one you configured explicitly raises an error.
+- **Dependencies.** `skill_pinning` needs `skill_suggestion`, and `escalation` needs `model_router`. Turning on a dependent without its dependency raises an error.
 
 ## When Jev cannot answer
 
@@ -129,7 +136,7 @@ Blueprints listed in `JevConfig.fail_closed` refuse when Jev cannot be reached; 
 - **Tool approval needs a checkpointer.** `tool_gate` pauses risky calls for approval in `HumanInTheLoopMiddleware`'s format. Without a checkpointer, the run stops at the request and the tool does not run. Set `ToolGateSettings(ask_human=False)` to refuse instead of pausing.
 - **The output guard runs after generation.** With token streaming, the user may already have seen a reply before it is replaced.
 - **Harness profiles are a beta, process-global API.** `register_jev_profile` relies on deepagents' `HarnessProfile`, which is beta and applies to every agent in the process. It does not reach `CompiledSubAgent` or `AsyncSubAgent` runnables.
-- **Citations need a known format.** `citation_check` reads `[cite: <source id> | "<exact quote>"]`. Set `VerifySettings(add_citation_instructions=True)` to ask the model for that format.
+- **Citations need a known format.** `citation_check` reads `[cite: <source id> | "<exact quote>"]`, and the model is asked for that format while the check is on. Set `VerifySettings(add_citation_instructions=False)` if your own prompt already asks for it.
 
 ## Development
 

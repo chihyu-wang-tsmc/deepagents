@@ -59,7 +59,7 @@ DEFAULT_REVIEW_PROMPT = (
 )
 
 OPT_IN: frozenset[str] = frozenset({CHAT_MODE})
-"""Blueprints that stay off unless `JevConfig.blueprints` turns them on."""
+"""Blueprints that stay off even with `default_mode="on"`, unless listed in `blueprints`."""
 
 
 @dataclass(frozen=True)
@@ -151,8 +151,8 @@ class MemorySettings:
     """Runtime-context key naming the user; the thread id is used without it."""
 
     max_items: int = 20
-    filter_relevant: bool = False
-    """Ask Jev which saved facts matter for this request instead of sending all."""
+    filter_relevant: bool = True
+    """Ask Jev which saved facts matter for this request; off sends every saved fact."""
 
 
 @dataclass(frozen=True)
@@ -191,7 +191,8 @@ class VerifySettings:
 
     max_retries: int = 1
     exhausted: Literal["accept", "annotate"] = "accept"
-    add_citation_instructions: bool = False
+    add_citation_instructions: bool = True
+    """While `citation_check` is on, tell the model to cite in the format it reads."""
 
 
 @dataclass(frozen=True)
@@ -199,19 +200,26 @@ class ReviewSettings:
     """Hand finished runs to the agent-trace review."""
 
     on_review: Callable[[RunReview], None] | None = None
-    """Called with the review when `inline` is true."""
+    """Called with each run's review, made by asking Jev right after the run."""
 
     on_run_end: Callable[[list[AnyMessage]], None] | None = None
     """Called with the transcript, for reviewing later off the request path."""
 
     irreversible_tools: Sequence[str] = ("execute", "write_file", "edit_file")
     agent_instructions: str | None = None
-    inline: bool = False
+    """The agent's entitlements and rules; enables the review's `within_grant` check."""
+
+    inline: bool | None = None
+    """Review each run right after it ends; `None` does so whenever `on_review` is set."""
 
 
 @dataclass(frozen=True)
 class JevConfig:
-    """Everything the Jev stack needs; every field has a working default.
+    """Everything the Jev stack needs.
+
+    Every blueprint is off until `blueprints` turns it on. A blueprint that is on
+    asks Jev all of its questions; `tool_gate.within_grant` and the review's
+    `within_grant` also need the policy text they check against.
 
     Example:
         ```python
@@ -219,7 +227,7 @@ class JevConfig:
 
         config = JevConfig(
             model="h2o-lightning-4b",  # or "typesafe", or JEV_MODEL=...
-            blueprints={"answer_scoring": "shadow", "fast_path": "off"},
+            blueprints={"input_guard": "on", "tool_gate": "on", "answer_scoring": "shadow"},
             mode_source=FileModeSource("jev_modes.json"),
         )
         ```
@@ -235,9 +243,11 @@ class JevConfig:
     """A candidate model asked alongside the main one; disagreements are reported."""
 
     blueprints: Mapping[str, Mode] = field(default_factory=dict)
-    """Build-time modes. `off` leaves a blueprint out of the stack entirely."""
+    """Blueprints to build, as `on` or `shadow`; any blueprint not listed stays off."""
 
-    default_mode: Mode = "on"
+    default_mode: Mode = "off"
+    """Mode for blueprints missing from `blueprints`. `on` builds every blueprint
+    whose settings are given, except `chat_mode`."""
     mode_source: ModeSource | None = None
     """Read at the start of each run, so modes change without a restart."""
 

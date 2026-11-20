@@ -88,18 +88,21 @@ _CHECKS = (VERIFY_ANSWER, CITATION_CHECK, ANSWER_SCORING)
 def jev_middleware(
     config: JevConfig | None = None, *, runtime: JevRuntime | None = None
 ) -> list[AgentMiddleware[Any, Any, Any]]:
-    """Build the ordered middleware for the installed blueprints.
+    """Build the ordered middleware for the blueprints `config` turns on.
 
     Pass the result to `create_deep_agent(middleware=...)` for the main agent only,
-    or use `register_jev_profile` so subagents get the same checks.
+    or use `register_jev_profile` so subagents get the same checks. With no blueprint
+    on, the list is empty.
 
     Args:
-        config: What to install; defaults to `JevConfig()`.
+        config: What to install; `JevConfig()` turns nothing on.
         runtime: Share one runtime (its models, cache, and in-process memory)
             between several stacks.
     """
     jev = runtime or JevRuntime(config or JevConfig())
     installed = jev.installed
+    if not installed:
+        return []
     stack: list[AgentMiddleware[Any, Any, Any]] = [JevRunMiddleware(jev)]
     if MEMORY_READ in installed:
         stack.append(MemoryReadMiddleware(jev))
@@ -123,7 +126,7 @@ def register_jev_profile(providers: Sequence[str], config: JevConfig | None = No
 
     Args:
         providers: Profile keys such as `openai`, `anthropic`, or `openai:gpt-5.4`.
-        config: What to install; defaults to `JevConfig()`.
+        config: What to install; `JevConfig()` turns nothing on.
 
     Returns:
         The shared runtime, for inspection or to build more stacks with it.

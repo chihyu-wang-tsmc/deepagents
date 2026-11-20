@@ -15,11 +15,11 @@ if TYPE_CHECKING:
 
 
 class RunReviewMiddleware(JevMiddleware):
-    """Pass the transcript on for review, or review it inline when configured.
+    """Review each finished run, and hand its transcript on.
 
-    Reviewing inline adds a few Jev requests after the final answer. Leave `inline`
-    off to hand the transcript to `on_run_end` and review it off the request path
-    with `review_run`.
+    With `on_review` set, the run is reviewed right after it ends, which adds a few
+    Jev requests after the final answer. With `on_run_end` set, the transcript is
+    handed over to review later, off the request path, with `review_run`.
     """
 
     blueprint = RUN_REVIEW
@@ -38,9 +38,10 @@ class RunReviewMiddleware(JevMiddleware):
         messages = list(state["messages"])
         if mode == "off":
             return None
-        if not settings.inline:
-            if mode == "on" and settings.on_run_end is not None:
-                settings.on_run_end(messages)
+        if mode == "on" and settings.on_run_end is not None:
+            settings.on_run_end(messages)
+        inline = settings.on_review is not None if settings.inline is None else settings.inline
+        if not inline:
             self.record(mode, "handed_off", messages=len(messages))
             return None
         context = RunContext(

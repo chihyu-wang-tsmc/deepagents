@@ -135,6 +135,20 @@ DEFAULT_ROUTE_CRITERIA: dict[str, str] = {
     ),
 }
 
+CODING = noul(
+    "Will answering this well require the assistant to produce or reason about code?",
+    yes="Writing functions or scripts, fixing bugs, refactoring, reviewing or explaining code, "
+    "SQL, shell commands, and any programming or algorithmic problem the assistant is expected "
+    "to solve with code, including a competitive-programming problem statement or a word "
+    "problem to be solved programmatically, even when it never says 'write code'.",
+    no="Tasks needing no code from the assistant: documents, slides, spreadsheets, images or "
+    "writing, and factual or multiple-choice questions answered in prose, even about software "
+    "or security.",
+)
+"""From open-source-jev (`classifiers.py`): asking whether a good answer needs code, not
+whether the user asked for code, raised accuracy on APPS from 48% to 97% and on
+LiveCodeBench from 35% to 90%."""
+
 MODE = Choice(
     instructions=(
         "Should this request be handled in chat mode or agent mode? Chat mode answers "

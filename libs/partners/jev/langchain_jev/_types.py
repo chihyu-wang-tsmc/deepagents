@@ -19,6 +19,7 @@ INPUT_GUARD = "input_guard"
 TOOL_RESULT_GUARD = "tool_result_guard"
 OUTPUT_GUARD = "output_guard"
 MODEL_ROUTER = "model_router"
+CODING_ROUTER = "coding_router"
 CHAT_MODE = "chat_mode"
 ESCALATION = "escalation"
 FAST_PATH = "fast_path"
@@ -39,6 +40,7 @@ BLUEPRINTS: tuple[str, ...] = (
     TOOL_RESULT_GUARD,
     OUTPUT_GUARD,
     MODEL_ROUTER,
+    CODING_ROUTER,
     CHAT_MODE,
     ESCALATION,
     FAST_PATH,

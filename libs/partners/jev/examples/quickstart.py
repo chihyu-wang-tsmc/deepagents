@@ -64,6 +64,7 @@ blueprints = {
 # 其他藍圖，需要時加進上面的 blueprints：
 #   有 skills 時：skill_suggestion、skill_pinning、skill_load_check
 #   chat_mode：一則文字回覆就能回答時，不給模型工具
+#   coding_router（coding=CodingSettings(model=...)）：需要寫程式的請求改用 coding 模型
 #   要先給設定：model_router（router=）、escalation（router.escalate_to）、
 #     fast_path（fast_path=）、rag_passages（rag=）、run_review（review=）
 #   要有證據才有作用：verify_answer、citation_check（搭配 rag_passages 或 verify.evidence_tools）

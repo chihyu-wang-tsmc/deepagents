@@ -51,6 +51,7 @@ QUESTIONS: dict[str, FullQuestion] = {
     **_group("output_guard", q.OUTPUT_BATTERY),
     "output_guard.severity": q.SEVERITY,
     **_group("tool_result_guard", q.TOOL_RESULT_QUESTIONS),
+    "coding_router.coding": q.CODING,
     "chat_mode.mode": q.MODE,
     "fast_path.functions_fit": q.FUNCTIONS_FIT,
     **_group("skill_suggestion", q.SKILL_ACTION_QUESTIONS),

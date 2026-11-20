@@ -22,6 +22,7 @@ from langchain_jev._types import (
     ANSWER_SCORING,
     CHAT_MODE,
     CITATION_CHECK,
+    CODING_ROUTER,
     FAST_PATH,
     INPUT_GUARD,
     MEMORY_READ,
@@ -46,7 +47,11 @@ from langchain_jev.middleware.guardrails import (
 from langchain_jev.middleware.memory import MemoryReadMiddleware, MemoryWriteMiddleware
 from langchain_jev.middleware.rag import RagPassagesMiddleware
 from langchain_jev.middleware.review import RunReviewMiddleware
-from langchain_jev.middleware.routing import ChatModeMiddleware, ModelRouterMiddleware
+from langchain_jev.middleware.routing import (
+    ChatModeMiddleware,
+    CodingRouterMiddleware,
+    ModelRouterMiddleware,
+)
 from langchain_jev.middleware.run import (
     EntryParticipant,
     JevEntryMiddleware,
@@ -70,6 +75,7 @@ _ENTRY: tuple[tuple[str, Callable[[JevRuntime], JevMiddleware]], ...] = (
     (INPUT_GUARD, InputGuardMiddleware),
     (FAST_PATH, FastPathMiddleware),
     (MODEL_ROUTER, ModelRouterMiddleware),
+    (CODING_ROUTER, CodingRouterMiddleware),
     (CHAT_MODE, ChatModeMiddleware),
 )
 _REST: tuple[tuple[str, Callable[[JevRuntime], JevMiddleware]], ...] = (

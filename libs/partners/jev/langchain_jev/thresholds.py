@@ -30,6 +30,8 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "tool_result_guard.injection": 0.70,
     # https://docs.typesafe.ai/patterns/confidence-routing: 0 keeps the top choice
     "model_router.min_confidence": 0.0,
+    # open-source-jev `coding_report.py`: P(coding) >= 0.5 counts as coding in production
+    "coding_router.min_coding": 0.50,
     # https://docs.typesafe.ai/patterns/probability-routing: a costly action needs more
     "chat_mode.min_probability": 0.80,
     # https://docs.typesafe.ai/patterns/companion-noul
@@ -71,6 +73,7 @@ NOUL_THRESHOLDS: frozenset[str] = frozenset(
         "output_guard.review",
         "output_guard.action",
         "tool_result_guard.injection",
+        "coding_router.min_coding",
         "fast_path.min_fits",
         "skill_suggestion.action",
         "skill_suggestion.named",

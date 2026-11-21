@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Generator, Mapping
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.runnables.config import ContextThreadPoolExecutor
 
 from langchain_jev._types import JevEvent, Mode
 from langchain_jev.state import JevState
@@ -125,7 +125,8 @@ class JevMiddleware(AgentMiddleware[JevState]):
         if isinstance(step, Ask):
             return self._ask(step)
         if isinstance(step, AskMany):
-            with ThreadPoolExecutor(max_workers=_PARALLEL) as pool:
+            # Copy the run's context into each worker so tracing callbacks see the requests.
+            with ContextThreadPoolExecutor(max_workers=_PARALLEL) as pool:
                 return list(pool.map(self._ask, step.asks))
         if handler is None:
             msg = "This hook has no handler to run."

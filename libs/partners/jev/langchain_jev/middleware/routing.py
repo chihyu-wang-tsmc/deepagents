@@ -1,27 +1,24 @@
 """Pick the model for each call, and drop tools for requests a reply can answer.
 
 The routing and coding questions ride in the entry request. A request whose answer
-needs code goes to the coding model, which beats the routed model. A retry after a
-failed verification escalates to `RouterSettings.escalate_to` (the "cheap first,
-escalate on failure" cascade of https://docs.typesafe.ai/cookbooks/sde_cascade), and
-escalation beats both.
+needs code goes to the coding model, which beats the routed model.
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 
 from langchain.chat_models import init_chat_model
 from langchain_core.decisions import Choice
 from langchain_core.decisions.types import ChoiceAnswer, NoulAnswer
 
-from langchain_jev._types import CHAT_MODE, CODING_ROUTER, ESCALATION, MODEL_ROUTER
+from langchain_jev._types import CHAT_MODE, CODING_ROUTER, MODEL_ROUTER
 from langchain_jev.middleware._base import JevMiddleware
 from langchain_jev.middleware.run import entry_answers
-from langchain_jev.switches import mode_for
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable, Mapping
+
     from langchain.agents.middleware.types import ModelRequest, ModelResponse
     from langchain_core.decisions import Question
     from langchain_core.language_models import BaseChatModel
@@ -73,16 +70,13 @@ class ModelRouterMiddleware(JevMiddleware):
         answer = answers.get("model_route")
         if mode == "off" or not isinstance(answer, ChoiceAnswer):
             return request
-        choice, reason = self._choose(request.state, answer)
+        choice, reason = self._choose(answer)
         self.record(mode, f"route:{choice}", reason=reason, confidence=answer.confidence)
         if mode != "on":
             return request
         return request.override(model=self.models[choice])
 
-    def _choose(self, state: Mapping[str, object], answer: ChoiceAnswer) -> tuple[str, str]:
-        target = self.settings.escalate_to
-        if target and _escalating(state):
-            return target, "escalated after failed verification"
+    def _choose(self, answer: ChoiceAnswer) -> tuple[str, str]:
         low = answer.confidence < self.threshold("model_router.min_confidence")
         if low and self.settings.fallback:
             return self.settings.fallback, "low routing confidence"
@@ -128,20 +122,10 @@ class CodingRouterMiddleware(JevMiddleware):
         if mode == "off" or not isinstance(answer, NoulAnswer):
             return request
         coding = answer.noul >= self.threshold("coding_router.min_coding")
-        router = self.jev.config.router
-        escalated = coding and bool(router and router.escalate_to) and _escalating(request.state)
-        action = "route:escalated" if escalated else ("route:coding" if coding else "pass")
-        self.record(mode, action, coding=answer.noul)
-        if mode != "on" or not coding or escalated:
+        self.record(mode, "route:coding" if coding else "pass", coding=answer.noul)
+        if mode != "on" or not coding:
             return request
         return request.override(model=self.model)
-
-
-def _escalating(state: Mapping[str, object]) -> bool:
-    """Whether this call retries a failed answer on the escalation model."""
-    snapshot = state.get("jev_modes")
-    on = isinstance(snapshot, Mapping) and mode_for(snapshot, ESCALATION) == "on"
-    return on and bool(state.get("jev_escalate"))
 
 
 class ChatModeMiddleware(JevMiddleware):

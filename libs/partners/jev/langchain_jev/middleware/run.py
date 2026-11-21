@@ -48,8 +48,6 @@ class JevRunMiddleware(JevMiddleware):
             "jev_skill_hint": None,
             "jev_skill_done": False,
             "jev_evidence": Overwrite([]),
-            "jev_escalate": False,
-            "jev_attempts": 0,
         }
 
 

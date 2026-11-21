@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from deepagents import create_deep_agent
 from langchain_core.decisions import Choice
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage
 
 from langchain_jev import (
     CodingSettings,
@@ -16,7 +13,6 @@ from langchain_jev import (
     JevEvent,
     RouteChoice,
     RouterSettings,
-    VerifySettings,
     jev_middleware,
 )
 from langchain_jev.questions import DEFAULT_ROUTE_CRITERIA
@@ -81,47 +77,23 @@ def test_router_choices_named_fast_and_powerful_use_the_measured_descriptions() 
     assert sent.criteria == DEFAULT_ROUTE_CRITERIA
 
 
-def test_the_coding_model_beats_the_routed_model_but_not_escalation() -> None:
-    @tool
-    def search_docs(query: str) -> str:
-        """Search the API docs."""
-        return json.dumps([{"id": "p1", "text": "`add` returns the sum of its two arguments."}])
-
-    calls = [{"name": "search_docs", "args": {"query": "add"}, "id": "s1"}]
-    coder = FakeChat(
-        label="coder",
-        responses=[AIMessage(content="", tool_calls=calls), "`add` returns the difference."],
-    )
+def test_the_coding_model_beats_the_routed_model() -> None:
+    coder = FakeChat(label="coder", responses=["def add(a, b): return a + b"])
     fast = FakeChat(label="fast")
-    powerful = FakeChat(label="powerful", responses=["`add` returns the sum."])
-
-    def supported(state: object, qid: str) -> float:
-        answer = state.get("candidate_response", "") if isinstance(state, dict) else ""
-        return 0.95 if "sum" in answer else 0.05
-
     config = JevConfig(
-        model=ScriptedJev(rules={"coding": 0.9, "model_route": "fast", "supported": supported}),
+        model=ScriptedJev(rules={"coding": 0.9, "model_route": "fast"}),
         router=RouterSettings(
-            choices={"fast": RouteChoice(fast), "powerful": RouteChoice(powerful)},
-            escalate_to="powerful",
+            choices={"fast": RouteChoice(fast), "powerful": RouteChoice(FakeChat())}
         ),
         coding=CodingSettings(model=coder),
-        verify=VerifySettings(evidence_tools=["search_docs"]),
-        blueprints={
-            "model_router": "on",
-            "coding_router": "on",
-            "escalation": "on",
-            "verify_answer": "on",
-        },
-        cache_size=0,
+        blueprints={"model_router": "on", "coding_router": "on"},
     )
 
-    result = _run(fast, config, "What does the `add` function return?", tools=[search_docs])
+    result = _run(fast, config, "Write a Python function that adds two numbers.")
 
     assert fast.calls == []
-    assert len(coder.calls) == 2
-    assert len(powerful.calls) == 1
-    assert result["messages"][-1].content == "`add` returns the sum."
+    assert len(coder.calls) == 1
+    assert result["messages"][-1].content == "def add(a, b): return a + b"
 
 
 def test_missing_routing_settings_fail_when_the_config_is_checked() -> None:

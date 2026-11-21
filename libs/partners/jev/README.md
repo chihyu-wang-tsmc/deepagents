@@ -2,7 +2,7 @@
 
 Decision middleware for [`deepagents`](../../deepagents) built on System One models: TypeSafe's hosted [Jev](https://docs.typesafe.ai/), or an open-source model such as H2O-Lightning served behind a System One shim.
 
-Jev reads text and returns typed answers with calibrated probabilities instead of generated text. This package uses those answers for the decisions an agent makes around its LLM. It implements these agent blueprints from Typesafe's [use-case map](https://docs.typesafe.ai/concepts/use-case-map): guardrails, model routing, skill suggestion, RAG passage classification, tool gating, answer verification with escalation, and run review.
+Jev reads text and returns typed answers with calibrated probabilities instead of generated text. This package uses those answers for the decisions an agent makes around its LLM. It implements these agent blueprints from Typesafe's [use-case map](https://docs.typesafe.ai/concepts/use-case-map): guardrails, model routing, skill suggestion, RAG passage classification, tool gating, answer verification, and run review.
 
 Three properties hold throughout:
 
@@ -47,10 +47,11 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `verify_answer` | Does the answer follow from the evidence? | `after_agent` | [Verifying answers](https://docs.typesafe.ai/cookbooks/verify_llm_outputs) |
 | `citation_check` | Are quotes in their sources, and do they support the claim? | `after_agent` | [Citation check](https://docs.typesafe.ai/cookbooks/citation_check) |
 | `answer_scoring` | Weighted quality scores | `after_agent` | [Composite scoring](https://docs.typesafe.ai/patterns/composite-scoring) |
-| `escalation` | Retries a failed answer on the stronger model | `after_agent` → `wrap_model_call` | [SDE cascade](https://docs.typesafe.ai/cookbooks/sde_cascade) |
 | `run_review` | Hands finished runs to the trace review | `after_agent`, `review_run()` | [Agent trace observability](https://evals.typesafe.ai/agent_trace_observability) |
 
-Questions about the user's message share one Jev request. This covers the input guard, routing, the coding check, and chat mode, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing and escalation, `coding` for the coding model, `rag` retrieval tools, and `review` callbacks.
+Questions about the user's message share one Jev request. This covers the input guard, routing, the coding check, and chat mode, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing, `coding` for the coding model, `rag` retrieval tools, and `review` callbacks.
+
+`verify_answer`, `citation_check`, and `answer_scoring` check the final answer when the run ends. A failed check does not run the model again, because a retry on the same model mostly costs time. The reply keeps its text and gets `additional_kwargs["jev_checks"]`, which maps each failed check to why it failed. `VerifySettings(annotate=True)` also appends a note that the user can see.
 
 ```python
 from langchain_jev import CodingSettings, JevConfig, RouteChoice, RouterSettings
@@ -63,7 +64,7 @@ config = JevConfig(
 )
 ```
 
-When Jev says a good answer needs code (P ≥ 0.5, the cut open-source-jev uses), the coding model takes the call instead of the routed one. A retry after a failed verification still goes to `RouterSettings.escalate_to`.
+When Jev says a good answer needs code (P ≥ 0.5, the cut open-source-jev uses), the coding model takes the call instead of the routed one.
 
 ## Swapping the Jev model
 
@@ -137,7 +138,7 @@ Each blueprint is `off`, `shadow` (ask Jev and record, but change nothing), or `
 - **Parts.** A part narrows its blueprint but never widens it. For example: `input_guard.medical_advice`, `output_guard.self_harm`, `tool_gate.execute`, `tool_result_guard.<tool>`, `rag_passages.<tool>`, or `skill_load_check.<skill>`.
 - **One snapshot per run.** Modes are read once when a run starts and kept for the whole run, including after a human-in-the-loop interrupt resumes.
 - **Off means plain deepagents.** A blueprint that is off falls back to standard deepagents behavior. For example, the default model is used instead of the routed one, and retrieval results pass through unchanged.
-- **Dependencies.** `skill_pinning` needs `skill_suggestion`, and `escalation` needs `model_router`. Turning on a dependent without its dependency raises an error.
+- **Dependencies.** `skill_pinning` needs `skill_suggestion`. Turning it on without `skill_suggestion` raises an error.
 
 ## When Jev cannot answer
 
@@ -145,7 +146,7 @@ Blueprints listed in `JevConfig.fail_closed` refuse when Jev cannot be reached; 
 
 ## Notes and limits
 
-- **Removed blueprints.** `fast_path` called functions outside the tool gate and human approval, and `memory_read` / `memory_write` put every run with neither a user id nor a thread id into one shared memory, so all three were removed. Naming one in `blueprints`, `models`, `thresholds`, or `questions` raises a `ValueError` that says it was removed.
+- **Removed blueprints.** `fast_path` called functions outside the tool gate and human approval, `memory_read` / `memory_write` put every run with neither a user id nor a thread id into one shared memory, and `escalation` re-ran failed answers on a stronger model, so all four were removed. Naming one in `blueprints`, `models`, `thresholds`, or `questions` raises a `ValueError` that says it was removed. `RouterSettings.escalate_to` went with `escalation`.
 - **Not yet run against a live Jev server.** The unit tests use scripted decision and chat models. Questions are copied from the docs, and thresholds come from the cookbooks, which were measured with `jev-1.14.0`. Re-run your own evaluation sets after changing models.
 - **Tool approval needs a checkpointer.** `tool_gate` pauses risky calls for approval in `HumanInTheLoopMiddleware`'s format. Without a checkpointer, the run stops at the request and the tool does not run. Set `ToolGateSettings(ask_human=False)` to refuse instead of pausing.
 - **The output guard runs after generation.** With token streaming, the user may already have seen a reply before it is replaced.

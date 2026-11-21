@@ -12,6 +12,7 @@ import pytest
 from langchain_jev import (
     EnvModeSource,
     FileModeSource,
+    GuardSettings,
     JevConfig,
     JevModel,
     JevRuntime,
@@ -66,6 +67,16 @@ def test_removed_blueprints_are_named_in_the_error() -> None:
         JevConfig(blueprints={"memory_read": "on"}).installed()
     with pytest.raises(ValueError, match=r"escalation was removed"):
         JevConfig(blueprints={"escalation": "on"}).installed()
+
+
+def test_removed_hazards_are_named_in_the_error() -> None:
+    hazards = GuardSettings(input_hazards=("jailbreak", "self_harm"))
+    with pytest.raises(ValueError, match=r"self_harm was removed"):
+        JevConfig(guard=hazards).installed()
+    with pytest.raises(ValueError, match=r"output_guard\.medical_advice was removed"):
+        JevRuntime(
+            JevConfig(model=ScriptedJev(), questions={"output_guard.medical_advice": "Reworded."})
+        )
     with pytest.raises(ValueError, match=r"fast_path was removed"):
         JevRuntime(JevConfig(model=ScriptedJev(), thresholds={"fast_path.min_fits": 0.7}))
     with pytest.raises(ValueError, match=r"memory_write was removed"):
@@ -141,12 +152,12 @@ def test_more_specific_mode_layers_win_and_cannot_add_blueprints() -> None:
 def test_a_part_can_narrow_but_not_widen_its_blueprint() -> None:
     snapshot = {
         "input_guard": "shadow",
-        "input_guard.medical_advice": "on",
-        "input_guard.self_harm": "off",
+        "input_guard.harmful_request": "on",
+        "input_guard.drop_safeguards": "off",
     }
 
-    assert mode_for(snapshot, "input_guard", "medical_advice") == "shadow"
-    assert mode_for(snapshot, "input_guard", "self_harm") == "off"
+    assert mode_for(snapshot, "input_guard", "harmful_request") == "shadow"
+    assert mode_for(snapshot, "input_guard", "drop_safeguards") == "off"
     assert mode_for(snapshot, "input_guard", "jailbreak") == "shadow"
 
 

@@ -8,7 +8,7 @@
     run, for one user, thread, or experiment arm.
 
 The more specific level wins. Keys are blueprint ids (`tool_gate`) or a blueprint id
-and one of its parts (`input_guard.medical_advice`, `tool_gate.execute`). A part can
+and one of its parts (`input_guard.jailbreak`, `tool_gate.execute`). A part can
 narrow its blueprint (`on` to `shadow` or `off`) but never widen it.
 
 The modes are read once when a run starts and kept for the whole run, including

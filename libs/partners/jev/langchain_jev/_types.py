@@ -64,9 +64,20 @@ REMOVED_BLUEPRINTS: frozenset[str] = frozenset(
 """Blueprints this package no longer has, so errors can say so instead of "unknown"."""
 
 
+REMOVED_HAZARDS: frozenset[str] = frozenset({"medical_advice", "self_harm"})
+"""Guard hazards this package no longer asks about."""
+
+
 def removed_note(names: Iterable[str]) -> str:
-    """Say which of `names` (blueprints, or keys starting with one) were removed."""
-    gone = sorted({name.split(".", 1)[0] for name in names} & REMOVED_BLUEPRINTS)
+    """Say which of `names` (blueprints, hazards, or keys starting with one) were removed."""
+    found: set[str] = set()
+    for name in names:
+        head, _, rest = name.partition(".")
+        if head in REMOVED_BLUEPRINTS:
+            found.add(head)
+        elif head in REMOVED_HAZARDS or rest.split(".", 1)[0] in REMOVED_HAZARDS:
+            found.add(name)
+    gone = sorted(found)
     if not gone:
         return ""
     verb = "was" if len(gone) == 1 else "were"

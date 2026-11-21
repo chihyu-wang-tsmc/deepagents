@@ -2,7 +2,7 @@
 
 Follows https://docs.typesafe.ai/cookbooks/llm_guardrails: one request per message
 asks a battery of Nouls plus a severity Score, and `route` turns the probabilities
-into pass, review, block, or support with thresholds kept in code.
+into pass, review, or block with thresholds kept in code.
 """
 
 from __future__ import annotations
@@ -87,10 +87,6 @@ class _Guard(JevMiddleware):
         top = max(nouls, key=nouls.__getitem__) if nouls and action != "pass" else None
         return action, top, {**nouls, "severity": severity}
 
-    def _final_text(self, action: str) -> str:
-        settings = self.jev.config.guard
-        return settings.support_message if action == "support" else settings.refusal_message
-
 
 class InputGuardMiddleware(_Guard):
     """Screen the user's message before the agent's model sees it."""
@@ -108,7 +104,7 @@ class InputGuardMiddleware(_Guard):
 
     @hook_config(can_jump_to=["end"])
     def before_agent(self, state: JevState, runtime: Runtime) -> dict[str, object] | None:
-        """End the run with a refusal or support message when a hazard fires."""
+        """End the run with a refusal when a hazard fires."""
         mode = self.mode(state, runtime)
         if mode == "off" or not latest_request(state["messages"]):
             return None
@@ -124,7 +120,7 @@ class InputGuardMiddleware(_Guard):
         if action == "review":
             return {"jev_review": top}
         return {
-            "messages": [_jev_ai(self._final_text(action), self.blueprint)],
+            "messages": [_jev_ai(self.jev.config.guard.refusal_message, self.blueprint)],
             "jump_to": "end",
             "jev_blocked": True,
         }
@@ -288,15 +284,16 @@ class OutputGuardMiddleware(_Guard):
         )
         if response is None:
             self.record(mode, "unavailable", fail_closed=self.fails_closed)
-            return self._replace(reply, "block") if mode == "on" and self.fails_closed else None
+            return self._replace(reply) if mode == "on" and self.fails_closed else None
         action, top, values = self._decide(response.answers, hazards)
         self.record(mode, action, hazard=top, **values)
         if mode != "on" or action in {"pass", "review"}:
             return None
-        return self._replace(reply, action)
+        return self._replace(reply)
 
-    def _replace(self, reply: AIMessage, action: str) -> dict[str, object]:
-        replacement = _jev_ai(self._final_text(action), self.blueprint, message_id=reply.id)
+    def _replace(self, reply: AIMessage) -> dict[str, object]:
+        refusal = self.jev.config.guard.refusal_message
+        replacement = _jev_ai(refusal, self.blueprint, message_id=reply.id)
         return {"messages": [replacement], "jump_to": "end", "jev_blocked": True}
 
 

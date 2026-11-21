@@ -214,7 +214,7 @@ def test_rewording_a_question_that_is_never_asked_warns(caplog: pytest.LogCaptur
         guard=GuardSettings(input_hazards=("jailbreak",)),
         questions={
             "input_guard.jailbreak": "Asked.",
-            "input_guard.medical_advice": "Left out of the hazards.",
+            "input_guard.harmful_request": "Left out of the hazards.",
             "tool_gate.within_grant": "No policy to compare against.",
             "output_guard.broke_policy": "Its blueprint is off.",
         },
@@ -228,7 +228,7 @@ def test_rewording_a_question_that_is_never_asked_warns(caplog: pytest.LogCaptur
         r.getMessage() for r in caplog.records if "questions reworded" in r.getMessage()
     )
     assert (
-        "input_guard.medical_advice (add 'medical_advice' to GuardSettings.input_hazards)"
+        "input_guard.harmful_request (add 'harmful_request' to GuardSettings.input_hazards)"
         in warning
     )
     assert "tool_gate.within_grant (set ToolGateSettings.policy)" in warning

@@ -135,7 +135,7 @@ Each blueprint is `off`, `shadow` (ask Jev and record, but change nothing), or `
 - **Precedence.** The more specific level wins. Overrides cannot enable a blueprint that was not built.
 - **Every scenario is asked.** A blueprint that is on asks Jev all of its questions: the model is told how to cite while `citation_check` is on, and runs are reviewed as soon as `ReviewSettings.on_review` is set. Only the `within_grant` checks wait for the policy they compare against: `ToolGateSettings.policy` or `ReviewSettings.agent_instructions`.
 - **Everything at once.** `JevConfig(default_mode="on")` turns on every blueprint whose settings are given, except `chat_mode`.
-- **Parts.** A part narrows its blueprint but never widens it. For example: `input_guard.medical_advice`, `output_guard.self_harm`, `tool_gate.execute`, `tool_result_guard.<tool>`, `rag_passages.<tool>`, or `skill_load_check.<skill>`.
+- **Parts.** A part narrows its blueprint but never widens it. For example: `input_guard.jailbreak`, `output_guard.broke_policy`, `tool_gate.execute`, `tool_result_guard.<tool>`, `rag_passages.<tool>`, or `skill_load_check.<skill>`.
 - **One snapshot per run.** Modes are read once when a run starts and kept for the whole run, including after a human-in-the-loop interrupt resumes.
 - **Off means plain deepagents.** A blueprint that is off falls back to standard deepagents behavior. For example, the default model is used instead of the routed one, and retrieval results pass through unchanged.
 - **Dependencies.** `skill_pinning` needs `skill_suggestion`. Turning it on without `skill_suggestion` raises an error.
@@ -147,6 +147,7 @@ Blueprints listed in `JevConfig.fail_closed` refuse when Jev cannot be reached; 
 ## Notes and limits
 
 - **Removed blueprints.** `fast_path` called functions outside the tool gate and human approval, `memory_read` / `memory_write` put every run with neither a user id nor a thread id into one shared memory, and `escalation` re-ran failed answers on a stronger model, so all four were removed. Naming one in `blueprints`, `models`, `thresholds`, or `questions` raises a `ValueError` that says it was removed. `RouterSettings.escalate_to` went with `escalation`.
+- **Removed hazards.** The guards no longer ask about `medical_advice` or `self_harm`, and the support message that answered `self_harm` went with them. The input guard asks about `jailbreak`, `drop_safeguards`, and `harmful_request`, and the output guard about `broke_policy` and `harmful_request`. Naming a removed hazard in `GuardSettings` or in `questions` raises a `ValueError` that says it was removed.
 - **Not yet run against a live Jev server.** The unit tests use scripted decision and chat models. Questions are copied from the docs, and thresholds come from the cookbooks, which were measured with `jev-1.14.0`. Re-run your own evaluation sets after changing models.
 - **Tool approval needs a checkpointer.** `tool_gate` pauses risky calls for approval in `HumanInTheLoopMiddleware`'s format. Without a checkpointer, the run stops at the request and the tool does not run. Set `ToolGateSettings(ask_human=False)` to refuse instead of pausing.
 - **The output guard runs after generation.** With token streaming, the user may already have seen a reply before it is replaced.

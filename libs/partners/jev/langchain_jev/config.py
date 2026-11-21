@@ -45,11 +45,6 @@ if TYPE_CHECKING:
     ModelSpec = str | JevModel | BaseDecisionModel
 
 DEFAULT_REFUSAL = "I can't help with that request."
-DEFAULT_SUPPORT = (
-    "It sounds like you may be going through something difficult. You don't have to "
-    "face it alone: please reach out to someone you trust, or contact a local crisis "
-    "line or emergency services right away if you are in danger."
-)
 DEFAULT_REVIEW_PROMPT = (
     "A safety check flagged this request for possible {hazard}. Answer conservatively: "
     "give general information only and do not make personal decisions for the user."
@@ -73,7 +68,6 @@ class GuardSettings:
     """Hazards asked about each final reply."""
 
     refusal_message: str = DEFAULT_REFUSAL
-    support_message: str = DEFAULT_SUPPORT
 
     review_prompt: str = DEFAULT_REVIEW_PROMPT
     """Added to the system prompt when an input is sent to review; `{hazard}` is filled."""
@@ -342,6 +336,7 @@ class JevConfig:
                 f"{removed_note(unknown_models)}"
             )
             raise ValueError(msg)
+        self._check_hazards()
         self._check_router()
         self._check_questions()
 
@@ -364,6 +359,19 @@ class JevConfig:
                 "`VerifySettings.scores`, put the wording in each `ScoreSpec`."
             )
             raise ValueError(msg)
+
+    def _check_hazards(self) -> None:
+        for label, given, known in (
+            ("input_hazards", self.guard.input_hazards, INPUT_BATTERY),
+            ("output_hazards", self.guard.output_hazards, OUTPUT_BATTERY),
+        ):
+            unknown = sorted(set(given) - set(known))
+            if unknown:
+                msg = (
+                    f"`guard.{label}` names unknown hazards: {', '.join(unknown)}"
+                    f"{removed_note(unknown)}; choose from {sorted(known)}."
+                )
+                raise ValueError(msg)
 
     def _check_router(self) -> None:
         if self.router is None:

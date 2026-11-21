@@ -8,10 +8,8 @@ from typing import TYPE_CHECKING, Literal
 from langchain_jev._types import (
     BLUEPRINTS,
     CHAT_MODE,
-    CITATION_CHECK,
     CODING_ROUTER,
     DEPENDENCIES,
-    ESCALATION,
     INPUT_GUARD,
     MODEL_ROUTER,
     MODES,
@@ -19,7 +17,6 @@ from langchain_jev._types import (
     RAG_PASSAGES,
     RUN_REVIEW,
     TOOL_GATE,
-    VERIFY_ANSWER,
     JevEvent,
     Mode,
     removed_note,
@@ -97,15 +94,12 @@ class RouteChoice:
 
 @dataclass(frozen=True)
 class RouterSettings:
-    """Model routing; required for `model_router` and `escalation`."""
+    """Model routing; required for `model_router`."""
 
     choices: Mapping[str, RouteChoice]
     instructions: str = MODEL_ROUTE_INSTRUCTIONS
     fallback: str | None = None
     """Choice used when the routing confidence is below `model_router.min_confidence`."""
-
-    escalate_to: str | None = None
-    """Choice used after an answer fails verification (the `escalation` blueprint)."""
 
     def criteria(self) -> dict[str, str]:
         """Each choice's description, with the measured wording where none is given."""
@@ -181,11 +175,13 @@ class VerifySettings:
     """Look up a cited source by id when it is not among this run's passages."""
 
     scores: Mapping[str, ScoreSpec] | None = None
-    retry_on: frozenset[str] = frozenset({VERIFY_ANSWER, CITATION_CHECK})
-    """Checks whose failure sends the answer back to the model."""
+    annotate: bool = False
+    """Also append a note naming the failed checks to the reply the user sees.
 
-    max_retries: int = 1
-    exhausted: Literal["accept", "annotate"] = "accept"
+    A failed check never sends the answer back to the model. It is always recorded
+    in the reply's `additional_kwargs["jev_checks"]`; this adds a visible note too.
+    """
+
     add_citation_instructions: bool = True
     """While `citation_check` is on, tell the model to cite in the format it reads."""
 
@@ -321,10 +317,6 @@ class JevConfig:
         needs: dict[str, tuple[bool, str]] = {
             MODEL_ROUTER: (self.router is None, "`router` settings"),
             CODING_ROUTER: (self.coding is None, "`coding` settings naming the coding model"),
-            ESCALATION: (
-                self.router is None or self.router.escalate_to is None,
-                "`router.escalate_to`",
-            ),
             RAG_PASSAGES: (self.rag is None, "`rag` settings with retrieval tools"),
             RUN_REVIEW: (
                 self.review.on_review is None and self.review.on_run_end is None,
@@ -377,13 +369,10 @@ class JevConfig:
         if self.router is None:
             return
         names = set(self.router.choices)
-        for label, choice in (
-            ("fallback", self.router.fallback),
-            ("escalate_to", self.router.escalate_to),
-        ):
-            if choice is not None and choice not in names:
-                msg = f"`router.{label}` must be one of {sorted(names)}, got {choice!r}."
-                raise ValueError(msg)
+        fallback = self.router.fallback
+        if fallback is not None and fallback not in names:
+            msg = f"`router.fallback` must be one of {sorted(names)}, got {fallback!r}."
+            raise ValueError(msg)
         self._check_route_criteria()
 
     def _check_route_criteria(self) -> None:

@@ -63,9 +63,9 @@ blueprints = {
 #   有 skills 時：skill_suggestion、skill_pinning、skill_load_check
 #   chat_mode：一則文字回覆就能回答時，不給模型工具
 #   coding_router（coding=CodingSettings(model=...)）：需要寫程式的請求改用 coding 模型
-#   要先給設定：model_router（router=）、escalation（router.escalate_to）、
-#     rag_passages（rag=）、run_review（review=）
+#   要先給設定：model_router（router=）、rag_passages（rag=）、run_review（review=）
 #   要有證據才有作用：verify_answer、citation_check（搭配 rag_passages 或 verify.evidence_tools）
+#   檢查沒通過不會重答，只在回覆的 additional_kwargs["jev_checks"] 標記哪一項失敗
 
 # 4. 自訂要問 Jev 的問題（不寫就用預設；鍵的格式是「藍圖.場景」）
 #    - 給字串：只換問題本身，yes/no 的說明沿用預設

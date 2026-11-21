@@ -1,9 +1,9 @@
 """Jev (System One) decision middleware for deepagents.
 
 Typesafe's agent use cases as deepagents middleware: guardrails, model routing,
-skill suggestion, RAG passage classification, tool gating, answer verification with
-escalation, and run review. Each blueprint can be switched off, on, or into shadow
-mode at build time, without a restart, or per run; the Jev model is swapped by name.
+skill suggestion, RAG passage classification, tool gating, answer verification, and
+run review. Each blueprint can be switched off, on, or into shadow mode at build time,
+without a restart, or per run; the Jev model is swapped by name.
 """
 
 from langchain_jev._runtime import JevRuntime

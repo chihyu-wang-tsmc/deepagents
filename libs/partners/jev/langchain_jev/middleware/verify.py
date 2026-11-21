@@ -1,4 +1,4 @@
-"""Check the final answer, then retry, escalate, or accept it.
+"""Check the final answer, and mark it when a check fails.
 
 Three checks share one hook and run in parallel:
 
@@ -9,9 +9,9 @@ Three checks share one hook and run in parallel:
 - `answer_scoring` (https://docs.typesafe.ai/patterns/composite-scoring): weighted
     Score questions about the answer's quality.
 
-A failed check sends feedback to the model and loops back, as `RubricMiddleware`
-does. With `escalation` on, the retry runs on the router's stronger model: the
-"cheap first, escalate on failure" cascade of https://docs.typesafe.ai/cookbooks/sde_cascade.
+A failed check does not run the model again: retrying on the same model mostly
+costs time. The reply is marked instead: `additional_kwargs["jev_checks"]` maps each
+failed check to why it failed, and `VerifySettings.annotate` also adds a visible note.
 """
 
 from __future__ import annotations
@@ -21,8 +21,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from langchain.agents.middleware.types import hook_config
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from langchain_jev._messages import (
     append_system_text,
@@ -34,7 +33,6 @@ from langchain_jev._messages import (
 from langchain_jev._types import (
     ANSWER_SCORING,
     CITATION_CHECK,
-    ESCALATION,
     VERIFY_ANSWER,
     JevEvent,
 )
@@ -61,6 +59,8 @@ _CITATION = re.compile(r'\[cite:\s*(?P<source>[^|\]]+?)\s*\|\s*"(?P<quote>[^"]+)
 _QUOTES = str.maketrans({"\u201c": '"', "\u201d": '"', "\u2018": "'", "\u2019": "'"})
 """Fold curly quotes so a quote still matches its source (from the citation cookbook)."""
 CHECKS = (VERIFY_ANSWER, CITATION_CHECK, ANSWER_SCORING)
+JEV_CHECKS = "jev_checks"
+"""Key in the reply's `additional_kwargs`: each failed check, mapped to why it failed."""
 
 
 @dataclass
@@ -81,16 +81,14 @@ class _Check:
 
 
 class AnswerCheckMiddleware(JevMiddleware):
-    """Verify, citation-check, and score the final answer; retry or escalate on failure."""
+    """Verify, citation-check, and score the final answer; mark the checks it fails."""
 
     blueprint = VERIFY_ANSWER
 
-    @hook_config(can_jump_to=["model"])
     def after_agent(self, state: JevState, runtime: Runtime) -> dict[str, object] | None:
         """Check synchronously."""
         return self.drive(self._flow(state, runtime))
 
-    @hook_config(can_jump_to=["model"])
     async def aafter_agent(self, state: JevState, runtime: Runtime) -> dict[str, object] | None:
         """Check asynchronously."""
         return await self.adrive(self._flow(state, runtime))
@@ -110,7 +108,7 @@ class AnswerCheckMiddleware(JevMiddleware):
         asks = tuple(ask for check in checks for ask in check.asks)
         responses = cast("list[ClassifierResponse | None]", (yield AskMany(asks)) if asks else [])
         results = self._evaluate(checks, responses, modes)
-        return self._after(state, snapshot, reply, results, modes)
+        return self._mark(reply, results, modes)
 
     def _plan(self, state: JevState, answer: str, modes: Mapping[str, Mode]) -> list[_Check]:
         request = latest_request(state["messages"])
@@ -245,58 +243,25 @@ class AnswerCheckMiddleware(JevMiddleware):
 
         return _Check(ANSWER_SCORING, (ask,), evaluate)
 
-    def _after(
-        self,
-        state: JevState,
-        snapshot: Mapping[str, Mode],
-        reply: AIMessage,
-        results: list[CheckResult],
-        modes: Mapping[str, Mode],
+    def _mark(
+        self, reply: AIMessage, results: list[CheckResult], modes: Mapping[str, Mode]
     ) -> dict[str, object] | None:
-        settings = self.jev.config.verify
-        failures = [
-            r
-            for r in results
-            if r.failed and modes[r.blueprint] == "on" and r.blueprint in settings.retry_on
-        ]
-        attempts = int(state.get("jev_attempts") or 0)
-        if not failures:
-            return None
-        if attempts < settings.max_retries:
-            return self._retry(snapshot, failures, attempts)
-        if settings.exhausted == "annotate":
-            note = (
-                "\n\n(Note: an automatic check could not confirm this answer: "
-                + "; ".join(r.summary for r in failures)
-                + ".)"
-            )
-            return {"messages": [reply.model_copy(update={"content": reply.text + note})]}
-        return None
-
-    def _retry(
-        self, snapshot: Mapping[str, Mode], failures: list[CheckResult], attempts: int
-    ) -> dict[str, object]:
-        lines = "\n".join(f"- {r.summary}" for r in failures)
-        feedback = HumanMessage(
-            content=(
-                "[Jev check] Your previous answer did not pass these checks:\n"
-                f"{lines}\nRevise it using only what the sources support, and say so if they "
-                "do not answer the question."
-            ),
-            additional_kwargs={JEV_MARK: VERIFY_ANSWER},
-        )
-        update: dict[str, object] = {
-            "messages": [feedback],
-            "jump_to": "model",
-            "jev_attempts": attempts + 1,
+        """Record the failed checks on the reply itself; the model is not asked again."""
+        failed = {
+            r.blueprint: r.summary for r in results if r.failed and modes[r.blueprint] == "on"
         }
-        escalation = mode_for(snapshot, ESCALATION)
-        if escalation != "off":
-            self.jev.emit(JevEvent(ESCALATION, escalation, "escalate", {"attempt": attempts + 1}))
-        if escalation == "on":
-            update["jev_escalate"] = True
-        self.record("on", "retry", attempt=attempts + 1, failed=[r.blueprint for r in failures])
-        return update
+        if not failed:
+            return None
+        self.record("on", "mark", failed=list(failed))
+        update: dict[str, object] = {
+            "additional_kwargs": {**reply.additional_kwargs, JEV_CHECKS: failed}
+        }
+        if self.jev.config.verify.annotate:
+            note = "; ".join(failed.values())
+            update["content"] = (
+                f"{reply.text}\n\n(Note: an automatic check could not confirm this answer: {note}.)"
+            )
+        return {"messages": [reply.model_copy(update=update)]}
 
     def wrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]

@@ -24,7 +24,6 @@ OUTPUT_GUARD = "output_guard"
 MODEL_ROUTER = "model_router"
 CODING_ROUTER = "coding_router"
 CHAT_MODE = "chat_mode"
-ESCALATION = "escalation"
 SKILL_SUGGESTION = "skill_suggestion"
 SKILL_PINNING = "skill_pinning"
 SKILL_LOAD_CHECK = "skill_load_check"
@@ -42,7 +41,6 @@ BLUEPRINTS: tuple[str, ...] = (
     MODEL_ROUTER,
     CODING_ROUTER,
     CHAT_MODE,
-    ESCALATION,
     SKILL_SUGGESTION,
     SKILL_PINNING,
     SKILL_LOAD_CHECK,
@@ -57,11 +55,12 @@ BLUEPRINTS: tuple[str, ...] = (
 
 DEPENDENCIES: dict[str, tuple[str, ...]] = {
     SKILL_PINNING: (SKILL_SUGGESTION,),
-    ESCALATION: (MODEL_ROUTER,),
 }
 """Blueprints that only make sense when another blueprint is installed."""
 
-REMOVED_BLUEPRINTS: frozenset[str] = frozenset({"fast_path", "memory_read", "memory_write"})
+REMOVED_BLUEPRINTS: frozenset[str] = frozenset(
+    {"escalation", "fast_path", "memory_read", "memory_write"}
+)
 """Blueprints this package no longer has, so errors can say so instead of "unknown"."""
 
 

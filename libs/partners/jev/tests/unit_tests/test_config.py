@@ -64,6 +64,8 @@ def test_unknown_blueprints_and_thresholds_are_errors() -> None:
 def test_removed_blueprints_are_named_in_the_error() -> None:
     with pytest.raises(ValueError, match=r"memory_read was removed"):
         JevConfig(blueprints={"memory_read": "on"}).installed()
+    with pytest.raises(ValueError, match=r"escalation was removed"):
+        JevConfig(blueprints={"escalation": "on"}).installed()
     with pytest.raises(ValueError, match=r"fast_path was removed"):
         JevRuntime(JevConfig(model=ScriptedJev(), thresholds={"fast_path.min_fits": 0.7}))
     with pytest.raises(ValueError, match=r"memory_write was removed"):
@@ -79,9 +81,9 @@ def test_a_dependent_follows_its_dependency_unless_asked_for() -> None:
 
 def test_router_choices_must_exist() -> None:
     router = RouterSettings(
-        choices={"fast": RouteChoice(FakeChat(), "Simple.")}, escalate_to="powerful"
+        choices={"fast": RouteChoice(FakeChat(), "Simple.")}, fallback="powerful"
     )
-    with pytest.raises(ValueError, match="escalate_to"):
+    with pytest.raises(ValueError, match="fallback"):
         JevConfig(router=router).installed()
 
 

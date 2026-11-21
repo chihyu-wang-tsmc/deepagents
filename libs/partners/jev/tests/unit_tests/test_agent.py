@@ -19,10 +19,12 @@ from langchain_jev import (
     RouteChoice,
     RouterSettings,
     ToolGateSettings,
+    VerifySettings,
     jev_middleware,
     register_jev_profile,
 )
 from langchain_jev.config import DEFAULT_REFUSAL
+from langchain_jev.middleware.verify import JEV_CHECKS
 from tests.unit_tests.fakes import FakeChat, ScriptedJev
 
 if TYPE_CHECKING:
@@ -208,7 +210,7 @@ def test_tool_gate_covers_subagents_through_the_harness_profile(harness_registry
     assert "was not run" in refusals[-1].text
 
 
-def test_rag_drops_injected_passages_and_escalates_a_failed_answer() -> None:
+def test_rag_drops_injected_passages_and_marks_a_failed_answer() -> None:
     @tool
     def search_docs(query: str) -> str:
         """Search the auth docs."""
@@ -233,14 +235,10 @@ def test_rag_drops_injected_passages_and_escalates_a_failed_answer() -> None:
             "Tokens never rotate.",
         ],
     )
-    powerful = FakeChat(label="powerful", responses=["Refresh tokens rotate on every use [p1]."])
+    powerful = FakeChat(label="powerful")
 
     def injection(state: object, qid: str) -> float:
         return 0.95 if "Ignore previous" in json.dumps(state, default=str) else 0.01
-
-    def supported(state: object, qid: str) -> float:
-        answer = state.get("candidate_response", "") if isinstance(state, dict) else ""
-        return 0.95 if "rotate on every use" in answer else 0.05
 
     events: list[JevEvent] = []
     config = JevConfig(
@@ -250,7 +248,7 @@ def test_rag_drops_injected_passages_and_escalates_a_failed_answer() -> None:
                 "contains_prompt_injection": injection,
                 "is_relevant": 0.9,
                 "contains_answer_evidence": 0.9,
-                "supported": supported,
+                "supported": 0.05,
             }
         ),
         router=RouterSettings(
@@ -258,27 +256,24 @@ def test_rag_drops_injected_passages_and_escalates_a_failed_answer() -> None:
                 "fast": RouteChoice(fast, "Simple."),
                 "powerful": RouteChoice(powerful, "Hard."),
             },
-            escalate_to="powerful",
         ),
         rag=RagSettings(tools=["search_docs"]),
-        blueprints={
-            "model_router": "on",
-            "escalation": "on",
-            "rag_passages": "on",
-            "verify_answer": "on",
-        },
+        blueprints={"model_router": "on", "rag_passages": "on", "verify_answer": "on"},
         on_event=events.append,
         cache_size=0,
     )
 
     result = _agent(fast, config, tools=[search_docs]).invoke(_ask("Do refresh tokens rotate?"))
 
-    assert result["messages"][-1].content == "Refresh tokens rotate on every use [p1]."
     evidence = next(m for m in fast.calls[1] if isinstance(m, ToolMessage))
     assert "Refresh tokens rotate" in evidence.text
     assert "Ignore previous instructions" not in evidence.text
-    assert any(e.blueprint == "escalation" and e.action == "escalate" for e in events)
-    assert len(powerful.calls) == 1
+    reply = result["messages"][-1]
+    assert reply.content == "Tokens never rotate."  # marked, not rewritten
+    assert set(reply.additional_kwargs[JEV_CHECKS]) == {"verify_answer"}
+    assert any(e.blueprint == "verify_answer" and e.action == "fail" for e in events)
+    assert len(fast.calls) == 2  # no second answer
+    assert powerful.calls == []
 
 
 def test_skill_suggestion_hints_and_pins_the_winning_skill(tmp_path: Path) -> None:
@@ -360,7 +355,7 @@ def test_tool_gate_pauses_for_a_person_who_can_reject() -> None:
     assert tool_results[-1].text == "Not today."
 
 
-def test_a_fabricated_citation_sends_the_answer_back() -> None:
+def test_a_fabricated_citation_is_marked_and_noted() -> None:
     @tool
     def search_docs(query: str) -> str:
         """Search the RFC."""
@@ -381,7 +376,6 @@ def test_a_fabricated_citation_sends_the_answer_back() -> None:
                 tool_calls=[{"name": "search_docs", "args": {"query": "exp"}, "id": "q1"}],
             ),
             'Tokens never expire [cite: s4 | "tokens never expire"]',
-            'The exp claim sets when a token expires [cite: s4 | "identifies the expiration time"]',
         ]
     )
     events: list[JevEvent] = []
@@ -390,22 +384,24 @@ def test_a_fabricated_citation_sends_the_answer_back() -> None:
             rules={
                 "is_relevant": 0.9,
                 "contains_answer_evidence": 0.9,
-                "supported": 0.9,
                 "relation": "supports",
             }
         ),
         rag=RagSettings(tools=["search_docs"]),
+        verify=VerifySettings(annotate=True),
         blueprints={"rag_passages": "on", "citation_check": "on"},
         on_event=events.append,
     )
 
     result = _agent(chat, config, tools=[search_docs]).invoke(_ask("What does exp mean?"))
 
-    assert "identifies the expiration time" in result["messages"][-1].content
+    reply = result["messages"][-1]
+    assert reply.content.startswith('Tokens never expire [cite: s4 | "tokens never expire"]')
+    assert "(Note: an automatic check could not confirm this answer:" in reply.content
+    assert "s4" in reply.additional_kwargs[JEV_CHECKS]["citation_check"]
     assert "Cite every factual claim" in chat.sent_text(0)  # the model is told how to cite
-    citations = [e for e in events if e.blueprint == "citation_check"]
-    assert [e.action for e in citations] == ["fail", "pass"]
-    assert "[Jev check]" in chat.sent_text(-1)
+    assert [e.action for e in events if e.blueprint == "citation_check"] == ["fail"]
+    assert len(chat.calls) == 2  # no second answer
 
 
 def test_tool_results_that_instruct_the_agent_are_withheld() -> None:

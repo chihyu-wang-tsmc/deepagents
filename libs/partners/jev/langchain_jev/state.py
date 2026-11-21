@@ -42,9 +42,3 @@ class JevState(AgentState):
 
     jev_evidence: NotRequired[Annotated[list[dict], PrivateStateAttr, _extend]]
     """Passages the RAG blueprint accepted in this run."""
-
-    jev_escalate: NotRequired[Annotated[bool, PrivateStateAttr]]
-    """Set after a failed verification so the router picks the stronger model."""
-
-    jev_attempts: NotRequired[Annotated[int, PrivateStateAttr]]
-    """How many times verification sent the answer back in this run."""

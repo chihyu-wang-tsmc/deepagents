@@ -14,9 +14,20 @@ from langchain.agents.middleware.types import AgentState, PrivateStateAttr
 from langchain_jev._types import Mode  # noqa: TC001 - LangGraph reads state annotations at runtime
 
 
+def _passage_key(passage: dict) -> tuple[str, str]:
+    return str(passage.get("id", "")), str(passage.get("text", "")).strip()
+
+
 def _extend(left: list[dict] | None, right: list[dict] | None) -> list[dict]:
-    """Combine evidence written by parallel tool calls in the same step."""
-    return [*(left or []), *(right or [])]
+    """Combine evidence from every retrieval in the run, parallel calls included.
+
+    A passage found again (same id and same text) is kept once, in its latest place,
+    so the newest evidence stays last. Passages that only share an id are both kept:
+    a source without ids is numbered from 1 on every call.
+    """
+    merged = [*(left or []), *(right or [])]
+    last = {_passage_key(p): i for i, p in enumerate(merged)}
+    return [p for i, p in enumerate(merged) if last[_passage_key(p)] == i]
 
 
 class JevState(AgentState):

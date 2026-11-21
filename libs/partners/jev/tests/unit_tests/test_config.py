@@ -16,9 +16,11 @@ from langchain_jev import (
     JevConfig,
     JevModel,
     JevRuntime,
+    RagSettings,
     RouteChoice,
     RouterSettings,
     StaticModeSource,
+    VerifySettings,
     get_jev_model,
     jev_middleware,
     register_jev_model,
@@ -81,6 +83,40 @@ def test_removed_hazards_are_named_in_the_error() -> None:
         JevRuntime(JevConfig(model=ScriptedJev(), thresholds={"fast_path.min_fits": 0.7}))
     with pytest.raises(ValueError, match=r"memory_write was removed"):
         JevRuntime(JevConfig(model=ScriptedJev(), questions={"memory_write.remember": "Reworded."}))
+
+
+def test_answer_checks_without_a_source_warn(caplog: pytest.LogCaptureFixture) -> None:
+    config = JevConfig(
+        model=ScriptedJev(), blueprints={"verify_answer": "on", "citation_check": "on"}
+    )
+
+    with caplog.at_level(logging.WARNING, logger="langchain_jev"):
+        JevRuntime(config)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("verify_answer has no evidence" in m for m in messages)
+    assert any("citation_check cannot look up cited sources" in m for m in messages)
+
+
+def test_answer_checks_with_a_source_do_not_warn(caplog: pytest.LogCaptureFixture) -> None:
+    checks = {"verify_answer": "on", "citation_check": "on"}
+    with_rag = JevConfig(
+        model=ScriptedJev(),
+        rag=RagSettings(tools=["search_docs"]),
+        blueprints={**checks, "rag_passages": "on"},
+    )
+    with_settings = JevConfig(
+        model=ScriptedJev(),
+        verify=VerifySettings(evidence_tools=["search_docs"], sources=lambda source_id: None),
+        blueprints=checks,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="langchain_jev"):
+        JevRuntime(with_rag)
+        JevRuntime(with_settings)
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("has no evidence" in m or "cannot look up" in m for m in messages)
 
 
 def test_a_dependent_follows_its_dependency_unless_asked_for() -> None:

@@ -10,11 +10,11 @@ from langgraph.types import Overwrite
 from pydantic import TypeAdapter
 
 from langchain_jev._messages import clip, latest_request
-from langchain_jev.middleware._base import Ask, Flow, JevMiddleware
+from langchain_jev.middleware._base import Ask, AskMany, Flow, JevMiddleware
 from langchain_jev.switches import mode_for
 
 if TYPE_CHECKING:
-    from langchain_core.decisions import ClassifierResponse, Question
+    from langchain_core.decisions import BaseDecisionModel, ClassifierResponse, Question
     from langgraph.runtime import Runtime
 
     from langchain_jev._runtime import JevRuntime
@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 
 _ANSWER = TypeAdapter(Answer)
 _FAILED = "__failed__"
+_Group = tuple[tuple[str, ...], dict[str, "Question"]]
+"""The blueprints sharing one entry request, and its questions keyed `blueprint::qid`."""
 
 
 class EntryParticipant(Protocol):
@@ -77,35 +79,64 @@ class JevEntryMiddleware(JevMiddleware):
             "Mapping[str, Mode]",
             state.get("jev_modes") or self.jev.snapshot(runtime.context),
         )
-        questions = self._questions(snapshot)
+        groups = self._groups(snapshot)
         request = latest_request(state["messages"])
-        if not questions or not request:
+        if not groups or not request:
             return None
-        response = cast(
-            "ClassifierResponse | None",
-            (yield Ask(self._state(request), questions)),
-        )
-        if response is None:
-            return {"jev_entry": {_FAILED: {}}}
-        return {"jev_entry": {k: a.model_dump(mode="json") for k, a in response.answers.items()}}
+        message = self._state(request)
+        asks = tuple(Ask(message, questions, owners) for owners, questions in groups)
+        if len(asks) == 1:
+            responses = [cast("ClassifierResponse | None", (yield asks[0]))]
+        else:
+            responses = cast("list[ClassifierResponse | None]", (yield AskMany(asks)))
+        return {"jev_entry": _entry_record(groups, responses)}
 
-    def _questions(self, snapshot: Mapping[str, Mode]) -> dict[str, Question]:
-        questions: dict[str, Question] = {}
+    def _groups(self, snapshot: Mapping[str, Mode]) -> list[_Group]:
+        """The entry questions, one request per decision model the blueprints use."""
+        groups: list[tuple[BaseDecisionModel, list[str], dict[str, Question]]] = []
         for participant in self.participants:
-            if mode_for(snapshot, participant.blueprint) == "off":
+            blueprint = participant.blueprint
+            if mode_for(snapshot, blueprint) == "off":
                 continue
-            for qid, question in participant.entry_questions(snapshot).items():
-                questions[f"{participant.blueprint}::{qid}"] = question
-        return questions
+            asked = participant.entry_questions(snapshot)
+            if not asked:
+                continue
+            classifier = self.jev.classifier(blueprint)
+            group = next((g for g in groups if g[0] is classifier), None)
+            if group is None:
+                group = (classifier, [], {})
+                groups.append(group)
+            group[1].append(blueprint)
+            group[2].update({f"{blueprint}::{qid}": q for qid, q in asked.items()})
+        return [(tuple(owners), questions) for _, owners, questions in groups]
 
     def _state(self, request: str) -> dict[str, object]:
         return {"message": clip(request, self.jev.max_chars())}
 
 
+def _entry_record(
+    groups: Sequence[_Group], responses: Sequence[ClassifierResponse | None]
+) -> dict[str, dict]:
+    """Every answer by `blueprint::qid`, plus the blueprints whose request failed."""
+    record: dict[str, dict] = {}
+    failed: dict[str, bool] = {}
+    for (owners, _), response in zip(groups, responses, strict=True):
+        if response is None:
+            failed.update(dict.fromkeys(owners, True))
+        else:
+            record.update({k: a.model_dump(mode="json") for k, a in response.answers.items()})
+    if failed:
+        record[_FAILED] = failed
+    return record
+
+
 def entry_answers(state: Mapping[str, object], blueprint: str) -> dict[str, Answer] | None:
     """This blueprint's answers from the entry request, or `None` if it failed."""
     entry = state.get("jev_entry")
-    if not isinstance(entry, Mapping) or _FAILED in entry:
+    if not isinstance(entry, Mapping):
+        return None
+    failed = entry.get(_FAILED)
+    if isinstance(failed, Mapping) and (not failed or blueprint in failed):
         return None
     prefix = f"{blueprint}::"
     return {

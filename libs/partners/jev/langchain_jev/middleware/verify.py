@@ -154,10 +154,7 @@ class AnswerCheckMiddleware(JevMiddleware):
     def _verify(self, request: str, answer: str, evidence: list[dict]) -> _Check | None:
         if not evidence:
             return None
-        paragraphs = clip(
-            "\n\n".join(f"[{p['id']}] {p.get('title', '')}\n{p['text']}" for p in evidence),
-            self.jev.max_chars(),
-        )
+        paragraphs, left_out = _fit_evidence(evidence, answer, self.jev.max_chars())
         ask = Ask(
             {
                 "request": request,
@@ -175,7 +172,11 @@ class AnswerCheckMiddleware(JevMiddleware):
             nouls = {key: response.nouls[key].noul for key in CHECK_QUESTIONS}
             risk = nouls["answerable"] if nouls["declines"] >= 0.5 else 1 - nouls["supported"]  # noqa: PLR2004 - the cookbook's split
             summary = f"the answer may not follow from the retrieved sources (risk {risk:.2f})"
-            return CheckResult(VERIFY_ANSWER, risk >= limit, summary, {**nouls, "risk": risk})
+            if left_out:
+                total = len(evidence)
+                summary += f"; {left_out} of {total} passages were left out to fit the length limit"
+            details = {**nouls, "risk": risk, "passages": len(evidence), "left_out": left_out}
+            return CheckResult(VERIFY_ANSWER, risk >= limit, summary, details)
 
         return _Check(VERIFY_ANSWER, (ask,), evaluate)
 
@@ -286,6 +287,36 @@ class AnswerCheckMiddleware(JevMiddleware):
         return request.override(
             system_message=append_system_text(request.system_message, CITATION_INSTRUCTIONS)
         )
+
+
+def _block(passage: dict) -> str:
+    return f"[{passage['id']}] {passage.get('title', '')}\n{passage['text']}"
+
+
+def _fit_evidence(evidence: list[dict], answer: str, limit: int) -> tuple[str, int]:
+    """Fit the evidence into `limit` characters, and count the passages left out.
+
+    The evidence of a run with several retrievals can be longer than one Jev state
+    field. Cutting the joined text would drop the newest passages, which the answer
+    most likely uses. Passages the answer cites go in first, then the newest ones;
+    whatever fits is shown in retrieval order. A passage longer than the whole limit
+    is clipped.
+    """
+    cited = {source for _, source, _ in parse_citations(answer)}
+    cited |= {str(p["id"]) for p in evidence if f"[{p['id']}]" in answer}
+    first = [i for i, p in enumerate(evidence) if str(p["id"]) in cited]
+    chosen = set(first)
+    order = first + [i for i in reversed(range(len(evidence))) if i not in chosen]
+    kept: list[int] = []
+    used = 0
+    for index in order:
+        cost = len(_block(evidence[index])) + (2 if kept else 0)  # the blank line between
+        if used + cost <= limit:
+            kept.append(index)
+            used += cost
+    if not kept:
+        return clip(_block(evidence[order[0]]), limit), len(evidence) - 1
+    return "\n\n".join(_block(evidence[i]) for i in sorted(kept)), len(evidence) - len(kept)
 
 
 def parse_citations(answer: str) -> list[tuple[str, str, str]]:

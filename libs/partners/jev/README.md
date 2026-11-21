@@ -53,6 +53,8 @@ Questions about the user's message share one Jev request. This covers the input 
 
 `verify_answer`, `citation_check`, and `answer_scoring` check the final answer when the run ends. A failed check does not run the model again, because a retry on the same model mostly costs time. The reply keeps its text and gets `additional_kwargs["jev_checks"]`, which maps each failed check to why it failed. `VerifySettings(annotate=True)` also appends a note that the user can see.
 
+`verify_answer` checks the answer against the evidence from every retrieval in the run. A passage found more than once (same id and text) counts once. When the evidence is longer than the Jev model's `max_state_chars`, the passages the answer cites go in first, then the newest ones, and a failure reason says how many passages were left out.
+
 ```python
 from langchain_jev import CodingSettings, JevConfig, RouteChoice, RouterSettings
 

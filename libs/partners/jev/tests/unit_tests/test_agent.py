@@ -15,6 +15,7 @@ from langchain_jev import (
     FileModeSource,
     JevConfig,
     JevEvent,
+    JevModel,
     RagSettings,
     RouteChoice,
     RouterSettings,
@@ -353,6 +354,65 @@ def test_tool_gate_pauses_for_a_person_who_can_reject() -> None:
     assert deleted == []
     tool_results = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_results[-1].text == "Not today."
+
+
+def _two_searches(answer: str) -> tuple[FakeChat, ScriptedJev, JevConfig, object]:
+    """Two retrievals: the second finds p2 again and adds p3, each block ~110 characters."""
+    results = [
+        [
+            {"id": "p1", "title": "T", "text": "Refresh tokens rotate on every use. " * 3},
+            {"id": "p2", "title": "T", "text": "Access tokens expire after one hour. " * 3},
+        ],
+        [
+            {"id": "p2", "title": "T", "text": "Access tokens expire after one hour. " * 3},
+            {"id": "p3", "title": "T", "text": "Revoked tokens fail on their next use. " * 3},
+        ],
+    ]
+
+    @tool
+    def search_docs(query: str) -> str:
+        """Search the auth docs."""
+        return json.dumps(results.pop(0))
+
+    def search(cid: str) -> AIMessage:
+        call = {"name": "search_docs", "args": {"query": "tokens"}, "id": cid}
+        return AIMessage(content="", tool_calls=[call])
+
+    chat = FakeChat(responses=[search("s1"), search("s2"), answer])
+    jev = ScriptedJev(
+        rules={"is_relevant": 0.9, "contains_answer_evidence": 0.9, "supported": 0.05}
+    )
+    config = JevConfig(
+        # Room for two of the three passages in one state field.
+        model=JevModel(name="scripted-short", factory=lambda: jev, max_state_chars=250),
+        rag=RagSettings(tools=["search_docs"]),
+        blueprints={"rag_passages": "on", "verify_answer": "on"},
+    )
+    return chat, jev, config, search_docs
+
+
+def test_evidence_from_every_search_counts_once_and_the_newest_fits() -> None:
+    chat, jev, config, search_docs = _two_searches("Tokens rotate.")
+
+    result = _agent(chat, config, tools=[search_docs]).invoke(_ask("How do tokens work?"))
+
+    paragraphs = jev.asked("supported")[-1]["paragraphs"]
+    assert paragraphs.count("[p2]") == 1  # found twice, checked once
+    assert "[p3]" in paragraphs  # the newest passages fit
+    assert "[p1]" not in paragraphs
+    reason = result["messages"][-1].additional_kwargs[JEV_CHECKS]["verify_answer"]
+    assert "1 of 3 passages were left out" in reason
+
+
+def test_a_cited_passage_is_kept_even_when_older() -> None:
+    chat, jev, config, search_docs = _two_searches("Tokens rotate [p1].")
+
+    _agent(chat, config, tools=[search_docs]).invoke(_ask("How do tokens work?"))
+
+    paragraphs = jev.asked("supported")[-1]["paragraphs"]
+    assert "[p1]" in paragraphs  # cited
+    assert "[p3]" in paragraphs  # then the newest
+    assert "[p2]" not in paragraphs
 
 
 def test_a_fabricated_citation_is_marked_and_noted() -> None:

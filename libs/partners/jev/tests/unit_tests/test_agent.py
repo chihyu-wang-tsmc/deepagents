@@ -108,7 +108,54 @@ def test_unreachable_jev_fails_closed_for_the_input_guard() -> None:
 
     assert result["messages"][-1].content == DEFAULT_REFUSAL
     assert chat.calls == []
-    assert any(e.action == "unavailable" for e in events)
+    # The entry request's failure is reported under the blueprint that asked it.
+    assert [(e.blueprint, e.action) for e in events] == [
+        ("input_guard", "error"),
+        ("input_guard", "unavailable"),
+    ]
+
+
+def test_each_blueprint_asks_the_model_set_for_it() -> None:
+    main, scoring = ScriptedJev(), ScriptedJev(model="scoring")
+    down = ScriptedJev(model="down", fail=True)
+    events: list[JevEvent] = []
+    config = JevConfig(
+        model=main,
+        models={
+            "chat_mode": JevModel(name="down", factory=lambda: down),
+            "answer_scoring": JevModel(name="scoring", factory=lambda: scoring),
+        },
+        blueprints={"input_guard": "on", "chat_mode": "on", "answer_scoring": "on"},
+        on_event=events.append,
+    )
+
+    result = _agent(FakeChat(responses=["hello"]), config).invoke(_ask("hi"))
+
+    assert main.asked("hazard.jailbreak")
+    assert not main.asked("::mode")
+    assert not main.asked("addresses_request")
+    assert down.asked("::mode")
+    assert scoring.asked("addresses_request")
+    # Only chat_mode's request failed; input_guard still had its answers.
+    assert [e.blueprint for e in events if e.action == "error"] == ["chat_mode"]
+    assert result["messages"][-1].content == "hello"
+
+
+def test_shadow_disagreements_are_reported_under_each_blueprint() -> None:
+    events: list[JevEvent] = []
+    config = JevConfig(
+        model=ScriptedJev(),
+        shadow_model=ScriptedJev(model="candidate", rules={"jailbreak": 0.9}),
+        blueprints={"input_guard": "on", "chat_mode": "on"},
+        on_event=events.append,
+    )
+
+    _agent(FakeChat(responses=["hello"]), config).invoke(_ask("hi"))
+
+    disagreements = [e for e in events if e.action == "model_disagreement"]
+    assert [(e.blueprint, e.details["questions"]) for e in disagreements] == [
+        ("input_guard", ["input_guard::hazard.jailbreak"])
+    ]
 
 
 def test_router_sends_the_call_to_the_chosen_model() -> None:
@@ -460,7 +507,9 @@ def test_a_fabricated_citation_is_marked_and_noted() -> None:
     assert "(Note: an automatic check could not confirm this answer:" in reply.content
     assert "s4" in reply.additional_kwargs[JEV_CHECKS]["citation_check"]
     assert "Cite every factual claim" in chat.sent_text(0)  # the model is told how to cite
-    assert [e.action for e in events if e.blueprint == "citation_check"] == ["fail"]
+    # The mark is reported under the check that failed, not under verify_answer.
+    assert [e.action for e in events if e.blueprint == "citation_check"] == ["fail", "mark"]
+    assert not [e for e in events if e.blueprint == "verify_answer"]
     assert len(chat.calls) == 2  # no second answer
 
 

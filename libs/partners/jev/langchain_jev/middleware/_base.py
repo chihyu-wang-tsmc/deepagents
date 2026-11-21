@@ -38,6 +38,12 @@ class Ask:
     state: object
     """JSON-compatible state; LangChain messages are converted when sent."""
     questions: Mapping[str, Question]
+    blueprints: tuple[str, ...] = ()
+    """The blueprints whose questions these are; empty means the asking middleware's own.
+
+    They must share one decision model: the first one picks it, and a failed request
+    is reported as an `error` event for each of them.
+    """
 
 
 @dataclass(frozen=True)
@@ -152,15 +158,22 @@ class JevMiddleware(AgentMiddleware[JevState]):
         return await handler(step.request)
 
     def _ask(self, step: Ask) -> ClassifierResponse | None:
+        owners = step.blueprints or (self.blueprint,)
         try:
-            return self.jev.ask(self.blueprint, step.state, step.questions)
+            return self.jev.ask(owners[0], step.state, step.questions)
         except Exception as error:  # noqa: BLE001 - the blueprint's fail policy decides what a failed request means
-            self.record("on", "error", error=type(error).__name__, message=str(error)[:300])
+            self._report_error(owners, error)
             return None
 
     async def _aask(self, step: Ask) -> ClassifierResponse | None:
+        owners = step.blueprints or (self.blueprint,)
         try:
-            return await self.jev.aask(self.blueprint, step.state, step.questions)
+            return await self.jev.aask(owners[0], step.state, step.questions)
         except Exception as error:  # noqa: BLE001 - the blueprint's fail policy decides what a failed request means
-            self.record("on", "error", error=type(error).__name__, message=str(error)[:300])
+            self._report_error(owners, error)
             return None
+
+    def _report_error(self, owners: tuple[str, ...], error: Exception) -> None:
+        details = {"error": type(error).__name__, "message": str(error)[:300]}
+        for owner in owners:
+            self.jev.emit(JevEvent(owner, "on", "error", dict(details)))

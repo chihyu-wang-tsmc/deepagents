@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -105,7 +105,9 @@ class AnswerCheckMiddleware(JevMiddleware):
         checks = self._plan(state, reply.text, modes)
         if not checks:
             return None
-        asks = tuple(ask for check in checks for ask in check.asks)
+        asks = tuple(
+            replace(ask, blueprints=(check.blueprint,)) for check in checks for ask in check.asks
+        )
         responses = cast("list[ClassifierResponse | None]", (yield AskMany(asks)) if asks else [])
         results = self._evaluate(checks, responses, modes)
         return self._mark(reply, results, modes)
@@ -253,7 +255,8 @@ class AnswerCheckMiddleware(JevMiddleware):
         }
         if not failed:
             return None
-        self.record("on", "mark", failed=list(failed))
+        for blueprint, summary in failed.items():
+            self.jev.emit(JevEvent(blueprint, "on", "mark", {"summary": summary}))
         update: dict[str, object] = {
             "additional_kwargs": {**reply.additional_kwargs, JEV_CHECKS: failed}
         }

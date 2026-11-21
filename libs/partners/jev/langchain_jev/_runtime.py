@@ -11,7 +11,14 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, cast
 
 from langchain_jev._question_use import asked_overrides, unasked_questions
-from langchain_jev._types import CITATION_CHECK, RAG_PASSAGES, VERIFY_ANSWER, JevEvent, Mode
+from langchain_jev._types import (
+    BLUEPRINTS,
+    CITATION_CHECK,
+    RAG_PASSAGES,
+    VERIFY_ANSWER,
+    JevEvent,
+    Mode,
+)
 from langchain_jev.classifiers import serialize_state
 from langchain_jev.models import JevModel, as_jev_model
 from langchain_jev.question_book import QuestionBook
@@ -223,16 +230,11 @@ class JevRuntime:
     ) -> None:
         if shadow is None:
             return
-        differences = _differences(main, shadow)
-        if differences:
-            self.emit(
-                JevEvent(
-                    blueprint,
-                    "shadow",
-                    "model_disagreement",
-                    {"questions": differences},
-                )
-            )
+        by_owner: dict[str, list[str]] = {}
+        for name in _differences(main, shadow):
+            by_owner.setdefault(_owner(name, blueprint), []).append(name)
+        for owner, names in by_owner.items():
+            self.emit(JevEvent(owner, "shadow", "model_disagreement", {"questions": names}))
 
     def emit(self, event: JevEvent) -> None:
         """Log a decision and pass it to `JevConfig.on_event`."""
@@ -271,6 +273,12 @@ def _cache_key(
         },
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _owner(question: str, asker: str) -> str:
+    """The blueprint a question belongs to: entry questions are keyed `blueprint::qid`."""
+    head, sep, _ = question.partition("::")
+    return head if sep and head in BLUEPRINTS else asker
 
 
 def _differences(main: ClassifierResponse, shadow: ClassifierResponse) -> list[str]:

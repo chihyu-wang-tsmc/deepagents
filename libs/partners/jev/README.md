@@ -49,7 +49,7 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `answer_scoring` | Weighted quality scores | `after_agent` | [Composite scoring](https://docs.typesafe.ai/patterns/composite-scoring) |
 | `run_review` | Hands finished runs to the trace review | `after_agent`, `review_run()` | [Agent trace observability](https://evals.typesafe.ai/agent_trace_observability) |
 
-Questions about the user's message share one Jev request. This covers the input guard, routing, the coding check, and chat mode, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing, `coding` for the coding model, `rag` retrieval tools, and `review` callbacks.
+Questions about the user's message share one Jev request, or one per model when `models` gives these blueprints different models. This covers the input guard, routing, the coding check, and chat mode, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing, `coding` for the coding model, `rag` retrieval tools, and `review` callbacks.
 
 `verify_answer`, `citation_check`, and `answer_scoring` check the final answer when the run ends. A failed check does not run the model again, because a retry on the same model mostly costs time. The reply keeps its text and gets `additional_kwargs["jev_checks"]`, which maps each failed check to why it failed. `VerifySettings(annotate=True)` also appends a note that the user can see.
 

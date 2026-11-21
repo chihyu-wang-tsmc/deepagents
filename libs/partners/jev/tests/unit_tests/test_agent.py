@@ -445,17 +445,18 @@ def test_chat_mode_offers_no_tools_for_a_plain_question() -> None:
 
 
 def test_one_hazard_can_be_switched_off_on_its_own() -> None:
-    chat = FakeChat(responses=["Take it with food.", "Take it with food."])
-    rules = {"medical_advice": 0.95, "severity": 0}  # severe harm would turn review into block
+    chat = FakeChat(responses=["Locks use pins.", "Locks use pins."])
+    # A borderline score sends the request to review; severe harm would turn review into block.
+    rules = {"harmful_request": 0.5, "severity": 0}
     agent = _agent(chat, JevConfig(model=ScriptedJev(rules=rules), blueprints=INPUT_GUARD))
 
-    agent.invoke(_ask("What dose of ibuprofen should I take?"))
+    agent.invoke(_ask("How do pin tumbler locks work?"))
     agent.invoke(
-        _ask("What dose of ibuprofen should I take?"),
-        context={"jev_modes": {"input_guard.medical_advice": "off"}},
+        _ask("How do pin tumbler locks work?"),
+        context={"jev_modes": {"input_guard.harmful_request": "off"}},
     )
 
-    assert "possible medical advice" in chat.calls[0][0].text  # the system prompt
+    assert "possible harmful request" in chat.calls[0][0].text  # the system prompt
     assert "Answer conservatively" not in chat.calls[1][0].text
 
 

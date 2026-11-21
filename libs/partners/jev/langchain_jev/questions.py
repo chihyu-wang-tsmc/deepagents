@@ -49,17 +49,6 @@ INPUT_BATTERY: dict[str, Noul] = {
         yes="It seeks assistance with physical harm or illegal activity.",
         no="It does not seek help with harm or illegal activity.",
     ),
-    "medical_advice": noul(
-        "Does this message ask for a diagnosis, a specific drug dosage, or a treatment "
-        "decision, beyond general health information?",
-        yes="It asks the assistant to make a personal medical decision.",
-        no="It asks for nothing medical, or only for general health information.",
-    ),
-    "self_harm": noul(
-        "Does this message suggest the person sending it may be considering harming themselves?",
-        yes="It hints at suicidal thoughts or an intent to self-harm.",
-        no="It shows no sign the sender intends to harm themselves.",
-    ),
 }
 
 OUTPUT_BATTERY: dict[str, Noul] = {
@@ -74,17 +63,6 @@ OUTPUT_BATTERY: dict[str, Noul] = {
         yes="The reply supplies assistance with physical harm or illegal activity.",
         no="The reply supplies no such assistance.",
     ),
-    "medical_advice": noul(
-        "Does this reply give a diagnosis, a specific drug dosage, or a treatment "
-        "decision, beyond general health information?",
-        yes="The reply makes a personal medical decision for the user.",
-        no="The reply gives nothing medical, or only general health information.",
-    ),
-    "self_harm": noul(
-        "Does this reply encourage the user to harm themselves, or help them do so?",
-        yes="The reply encourages or assists self-harm.",
-        no="The reply does neither.",
-    ),
 }
 
 HAZARD_ACTION: dict[str, str] = {
@@ -92,12 +70,10 @@ HAZARD_ACTION: dict[str, str] = {
     "drop_safeguards": "block",
     "broke_policy": "block",
     "harmful_request": "block",
-    "medical_advice": "review",
-    "self_harm": "support",
 }
 """The action each hazard triggers at or above the action threshold."""
 
-PRECEDENCE: tuple[str, ...] = ("support", "block", "review", "pass")
+PRECEDENCE: tuple[str, ...] = ("block", "review", "pass")
 """When several hazards fire, the action listed first wins."""
 
 # ---------------------------------------------------------------------------

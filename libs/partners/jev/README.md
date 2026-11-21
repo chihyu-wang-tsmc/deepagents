@@ -55,6 +55,8 @@ Questions about the user's message share one Jev request. This covers the input 
 
 `verify_answer` checks the answer against the evidence from every retrieval in the run. A passage found more than once (same id and text) counts once. When the evidence is longer than the Jev model's `max_state_chars`, the passages the answer cites go in first, then the newest ones, and a failure reason says how many passages were left out.
 
+Both checks need a source. Without `rag_passages`, `verify_answer` needs `VerifySettings.evidence_tools` and `citation_check` needs `VerifySettings.sources`. Otherwise the first checks nothing and the second marks every citation unsupported, so the package warns at startup.
+
 ```python
 from langchain_jev import CodingSettings, JevConfig, RouteChoice, RouterSettings
 

@@ -11,7 +11,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, cast
 
 from langchain_jev._question_use import asked_overrides, unasked_questions
-from langchain_jev._types import JevEvent, Mode
+from langchain_jev._types import CITATION_CHECK, RAG_PASSAGES, VERIFY_ANSWER, JevEvent, Mode
 from langchain_jev.classifiers import serialize_state
 from langchain_jev.models import JevModel, as_jev_model
 from langchain_jev.question_book import QuestionBook
@@ -60,6 +60,7 @@ class JevRuntime:
     def _report_setup(self) -> None:
         if self.installed:
             self._warn_clamped()
+            self._warn_missing_sources()
         else:
             logger.warning(
                 "No Jev blueprint is on, so Jev is never asked. Every blueprint is off "
@@ -67,6 +68,21 @@ class JevRuntime:
                 "blueprints={'input_guard': 'on', 'tool_gate': 'on'}."
             )
         self._report_questions()
+
+    def _warn_missing_sources(self) -> None:
+        """Answer checks that would check nothing, or fail every citation, without a source."""
+        verify = self.config.verify
+        rag = RAG_PASSAGES in self.installed
+        if VERIFY_ANSWER in self.installed and not rag and not verify.evidence_tools:
+            logger.warning(
+                "verify_answer has no evidence to check answers against, so it never checks "
+                "one. Turn on rag_passages or set VerifySettings(evidence_tools=[...])."
+            )
+        if CITATION_CHECK in self.installed and not rag and verify.sources is None:
+            logger.warning(
+                "citation_check cannot look up cited sources, so it marks every citation "
+                "unsupported. Turn on rag_passages or set VerifySettings(sources=...)."
+            )
 
     def _report_questions(self) -> None:
         unasked = unasked_questions(self.config, self.installed)

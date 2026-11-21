@@ -12,11 +12,11 @@ Each scenario has a key, `<blueprint>.<name>`, for example `input_guard.jailbrea
 Three kinds of scenario take different overrides:
 
 - Most are complete questions and take either form.
-- Templates (`skill_suggestion.fits`, `skill_load_check.fits`,
-    `fast_path.functions_fit`) are filled per call; their instructions may use the
-    placeholders listed in `TEMPLATE_FIELDS`. Write a literal brace as `{{` or `}}`.
-- Instructions-only scenarios (`model_router.route`, `fast_path.which`,
-    `skill_suggestion.which`, `skill_suggestion.rerank`, `run_review.first_bad_step`)
+- Templates (`skill_suggestion.fits`, `skill_load_check.fits`) are filled per call;
+    their instructions may use the placeholders listed in `TEMPLATE_FIELDS`. Write a
+    literal brace as `{{` or `}}`.
+- Instructions-only scenarios (`model_router.route`, `skill_suggestion.which`,
+    `skill_suggestion.rerank`, `run_review.first_bad_step`)
     are choices whose options come from your configuration or the run, so they only
     take a string.
 
@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, TypeAlias
 from langchain_core.decisions import Choice, Noul, Score
 
 from langchain_jev import questions as q
+from langchain_jev._types import removed_note
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -53,14 +54,11 @@ QUESTIONS: dict[str, FullQuestion] = {
     **_group("tool_result_guard", q.TOOL_RESULT_QUESTIONS),
     "coding_router.coding": q.CODING,
     "chat_mode.mode": q.MODE,
-    "fast_path.functions_fit": q.FUNCTIONS_FIT,
     **_group("skill_suggestion", q.SKILL_ACTION_QUESTIONS),
     "skill_suggestion.named": q.SKILL_NAMED_QUESTION,
     "skill_suggestion.fits": q.SKILL_FITS,
     "skill_load_check.fits": q.SKILL_FITS,
     **_group("rag_passages", q.PASSAGE_QUESTIONS),
-    "memory_read.relevant": q.MEMORY_RELEVANT,
-    "memory_write.remember": q.REMEMBER,
     **_group("tool_gate", q.TOOL_GATE_QUESTIONS),
     **_group("verify_answer", q.CHECK_QUESTIONS),
     "citation_check.relation": q.CITATION_RELATION,
@@ -76,7 +74,6 @@ QUESTIONS: dict[str, FullQuestion] = {
 
 INSTRUCTIONS: dict[str, str] = {
     "model_router.route": q.MODEL_ROUTE_INSTRUCTIONS,
-    "fast_path.which": q.FUNCTION_ROUTE_INSTRUCTIONS,
     "skill_suggestion.which": q.SKILL_CHOICE_INSTRUCTIONS,
     "skill_suggestion.rerank": q.SKILL_RERANK_INSTRUCTIONS,
     "run_review.first_bad_step": q.FIRST_BAD_STEP,
@@ -84,7 +81,6 @@ INSTRUCTIONS: dict[str, str] = {
 """Scenarios whose options are only known at run time: only the instructions change."""
 
 TEMPLATE_FIELDS: dict[str, tuple[str, ...]] = {
-    "fast_path.functions_fit": ("functions",),
     "skill_suggestion.fits": ("name", "description"),
     "skill_load_check.fits": ("name", "description"),
 }
@@ -156,7 +152,7 @@ def _check_keys(given: Mapping[str, QuestionOverride]) -> None:
     unknown = sorted(set(given) - set(QUESTIONS) - set(INSTRUCTIONS))
     if unknown:
         msg = (
-            f"Unknown Jev question keys: {', '.join(unknown)}. "
+            f"Unknown Jev question keys: {', '.join(unknown)}.{removed_note(unknown)} "
             "`default_questions()` lists every key."
         )
         raise ValueError(msg)

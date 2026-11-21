@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from deepagents import create_deep_agent
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
 
-from langchain_jev import InMemoryJevMemory, JevConfig, MemorySettings, jev_middleware
+from langchain_jev import JevConfig, RagSettings, jev_middleware
 from tests.unit_tests.fakes import FakeChat, ScriptedJev
 
 
@@ -21,21 +23,36 @@ class _RunNames(BaseCallbackHandler):
 
 
 def test_parallel_jev_requests_are_traced() -> None:
-    store = InMemoryJevMemory()
-    for fact in ("We self-host on Windows Server.", "Our plan is Enterprise."):
-        store.save(("jev_memory", "u-1"), {"message": fact})
-    config = JevConfig(
-        model=ScriptedJev(rules={"relevant": 0.9}),
-        memory=MemorySettings(store=store),
-        blueprints={"memory_read": "on"},
+    @tool
+    def search_docs(query: str) -> str:
+        """Search the auth docs."""
+        return json.dumps(
+            [
+                {"id": "p1", "title": "Rotation", "text": "Refresh tokens rotate on every use."},
+                {"id": "p2", "title": "Expiry", "text": "Access tokens expire after an hour."},
+            ]
+        )
+
+    chat = FakeChat(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "search_docs", "args": {"query": "tokens"}, "id": "s1"}],
+            ),
+            "Refresh tokens rotate on every use.",
+        ]
     )
-    agent = create_deep_agent(model=FakeChat(responses=["ok"]), middleware=jev_middleware(config))
+    config = JevConfig(
+        model=ScriptedJev(rules={"is_relevant": 0.9, "contains_answer_evidence": 0.9}),
+        rag=RagSettings(tools=["search_docs"]),
+        blueprints={"rag_passages": "on"},
+    )
+    agent = create_deep_agent(model=chat, tools=[search_docs], middleware=jev_middleware(config))
     tracer = _RunNames()
 
     agent.invoke(
-        {"messages": [HumanMessage(content="Dashboards are slow.")]},
+        {"messages": [HumanMessage(content="How do tokens work?")]},
         config={"callbacks": [tracer]},
-        context={"user_id": "u-1"},
     )
 
-    assert tracer.names.count("ScriptedJev") == 2  # one relevance request per saved fact
+    assert tracer.names.count("ScriptedJev") == 2  # one classification request per passage

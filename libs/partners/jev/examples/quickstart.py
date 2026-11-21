@@ -57,8 +57,6 @@ blueprints = {
     "output_guard": "on",  # 最後的回覆：同樣的檢查
     "tool_result_guard": "on",  # 工具結果裡夾帶的指令（prompt injection）
     "tool_gate": "on",  # 工具執行前：風險、使用者是否同意、資料外洩、能不能復原
-    "memory_read": "on",  # 帶入記住的使用者事實，先問 Jev 哪些和這次有關
-    "memory_write": "on",  # 判斷這次對話裡有沒有值得記住的事實
     "answer_scoring": "on",  # 回答的品質分數
 }
 # 其他藍圖，需要時加進上面的 blueprints：
@@ -66,7 +64,7 @@ blueprints = {
 #   chat_mode：一則文字回覆就能回答時，不給模型工具
 #   coding_router（coding=CodingSettings(model=...)）：需要寫程式的請求改用 coding 模型
 #   要先給設定：model_router（router=）、escalation（router.escalate_to）、
-#     fast_path（fast_path=）、rag_passages（rag=）、run_review（review=）
+#     rag_passages（rag=）、run_review（review=）
 #   要有證據才有作用：verify_answer、citation_check（搭配 rag_passages 或 verify.evidence_tools）
 
 # 4. 自訂要問 Jev 的問題（不寫就用預設；鍵的格式是「藍圖.場景」）

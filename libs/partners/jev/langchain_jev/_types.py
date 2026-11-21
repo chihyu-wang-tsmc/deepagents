@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 Mode = Literal["off", "shadow", "on"]
 """How a blueprint behaves in a run.
@@ -22,13 +25,10 @@ MODEL_ROUTER = "model_router"
 CODING_ROUTER = "coding_router"
 CHAT_MODE = "chat_mode"
 ESCALATION = "escalation"
-FAST_PATH = "fast_path"
 SKILL_SUGGESTION = "skill_suggestion"
 SKILL_PINNING = "skill_pinning"
 SKILL_LOAD_CHECK = "skill_load_check"
 RAG_PASSAGES = "rag_passages"
-MEMORY_READ = "memory_read"
-MEMORY_WRITE = "memory_write"
 TOOL_GATE = "tool_gate"
 VERIFY_ANSWER = "verify_answer"
 CITATION_CHECK = "citation_check"
@@ -43,13 +43,10 @@ BLUEPRINTS: tuple[str, ...] = (
     CODING_ROUTER,
     CHAT_MODE,
     ESCALATION,
-    FAST_PATH,
     SKILL_SUGGESTION,
     SKILL_PINNING,
     SKILL_LOAD_CHECK,
     RAG_PASSAGES,
-    MEMORY_READ,
-    MEMORY_WRITE,
     TOOL_GATE,
     VERIFY_ANSWER,
     CITATION_CHECK,
@@ -63,6 +60,18 @@ DEPENDENCIES: dict[str, tuple[str, ...]] = {
     ESCALATION: (MODEL_ROUTER,),
 }
 """Blueprints that only make sense when another blueprint is installed."""
+
+REMOVED_BLUEPRINTS: frozenset[str] = frozenset({"fast_path", "memory_read", "memory_write"})
+"""Blueprints this package no longer has, so errors can say so instead of "unknown"."""
+
+
+def removed_note(names: Iterable[str]) -> str:
+    """Say which of `names` (blueprints, or keys starting with one) were removed."""
+    gone = sorted({name.split(".", 1)[0] for name in names} & REMOVED_BLUEPRINTS)
+    if not gone:
+        return ""
+    verb = "was" if len(gone) == 1 else "were"
+    return f" ({', '.join(gone)} {verb} removed from langchain-jev.)"
 
 
 @dataclass(frozen=True)

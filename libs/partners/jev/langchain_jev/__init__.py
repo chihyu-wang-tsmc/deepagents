@@ -1,10 +1,9 @@
 """Jev (System One) decision middleware for deepagents.
 
-Every blueprint in Typesafe's agent use cases, as deepagents middleware: guardrails,
-model routing, a fast path that skips the model, skill suggestion, RAG passage
-classification, memory, tool gating, answer verification with escalation, and run
-review. Each blueprint can be switched off, on, or into shadow mode at build time,
-without a restart, or per run; the Jev model is swapped by name.
+Typesafe's agent use cases as deepagents middleware: guardrails, model routing,
+skill suggestion, RAG passage classification, tool gating, answer verification with
+escalation, and run review. Each blueprint can be switched off, on, or into shadow
+mode at build time, without a restart, or per run; the Jev model is swapped by name.
 """
 
 from langchain_jev._runtime import JevRuntime
@@ -12,10 +11,8 @@ from langchain_jev._types import BLUEPRINTS, JevEvent, Mode
 from langchain_jev.classifiers import JevClassifierError, SystemOneClassifier
 from langchain_jev.config import (
     CodingSettings,
-    FastPathSettings,
     GuardSettings,
     JevConfig,
-    MemorySettings,
     RagSettings,
     ReviewSettings,
     RouteChoice,
@@ -24,18 +21,6 @@ from langchain_jev.config import (
     SkillSettings,
     ToolGateSettings,
     VerifySettings,
-)
-from langchain_jev.fast_routes import (
-    CallFunction,
-    DecisionRoute,
-    FunctionRoute,
-    HandOff,
-    Reply,
-)
-from langchain_jev.memory_store import (
-    GraphStoreMemory,
-    InMemoryJevMemory,
-    JevMemoryStore,
 )
 from langchain_jev.models import (
     JevModel,
@@ -62,29 +47,19 @@ from langchain_jev.switches import (
 
 __all__ = [
     "BLUEPRINTS",
-    "CallFunction",
     "CodingSettings",
-    "DecisionRoute",
     "EnvModeSource",
-    "FastPathSettings",
     "FileModeSource",
-    "FunctionRoute",
-    "GraphStoreMemory",
     "GuardSettings",
-    "HandOff",
-    "InMemoryJevMemory",
     "JevClassifierError",
     "JevConfig",
     "JevEvent",
-    "JevMemoryStore",
     "JevModel",
     "JevRuntime",
-    "MemorySettings",
     "Mode",
     "ModeSource",
     "QuestionOverride",
     "RagSettings",
-    "Reply",
     "ReviewSettings",
     "RouteChoice",
     "RouterSettings",

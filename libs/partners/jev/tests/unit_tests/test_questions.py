@@ -216,7 +216,7 @@ def test_rewording_a_question_that_is_never_asked_warns(caplog: pytest.LogCaptur
             "input_guard.jailbreak": "Asked.",
             "input_guard.medical_advice": "Left out of the hazards.",
             "tool_gate.within_grant": "No policy to compare against.",
-            "memory_write.remember": "Its blueprint is off.",
+            "output_guard.broke_policy": "Its blueprint is off.",
         },
     )
 
@@ -232,7 +232,7 @@ def test_rewording_a_question_that_is_never_asked_warns(caplog: pytest.LogCaptur
         in warning
     )
     assert "tool_gate.within_grant (set ToolGateSettings.policy)" in warning
-    assert "memory_write.remember (turn on memory_write in JevConfig.blueprints)" in warning
+    assert "output_guard.broke_policy (turn on output_guard in JevConfig.blueprints)" in warning
     assert "input_guard.jailbreak" not in warning
     assert "input_guard.jailbreak" in reworded
-    assert "memory_write.remember" not in reworded
+    assert "output_guard.broke_policy" not in reworded

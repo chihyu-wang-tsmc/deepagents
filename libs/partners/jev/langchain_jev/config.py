@@ -12,7 +12,6 @@ from langchain_jev._types import (
     CODING_ROUTER,
     DEPENDENCIES,
     ESCALATION,
-    FAST_PATH,
     INPUT_GUARD,
     MODEL_ROUTER,
     MODES,
@@ -23,6 +22,7 @@ from langchain_jev._types import (
     VERIFY_ANSWER,
     JevEvent,
     Mode,
+    removed_note,
 )
 from langchain_jev.question_book import QuestionBook
 from langchain_jev.questions import (
@@ -40,8 +40,6 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langchain_core.messages import AnyMessage, ToolMessage
 
-    from langchain_jev.fast_routes import FastRoute
-    from langchain_jev.memory_store import JevMemoryStore
     from langchain_jev.models import JevModel
     from langchain_jev.question_book import QuestionOverride
     from langchain_jev.review import RunReview
@@ -126,13 +124,6 @@ class CodingSettings:
 
 
 @dataclass(frozen=True)
-class FastPathSettings:
-    """Requests Jev handles without calling the agent's model."""
-
-    routes: Sequence[FastRoute]
-
-
-@dataclass(frozen=True)
 class SkillSettings:
     """Skill suggestion, pinning, and the check on skill loads."""
 
@@ -157,21 +148,6 @@ class RagSettings:
     query_arg: str = "query"
     parse: Callable[[ToolMessage], list[dict[str, object]] | None] | None = None
     """Turn a tool result into passages; the default reads JSON lists of objects."""
-
-
-@dataclass(frozen=True)
-class MemorySettings:
-    """The remember gate and saved-fact injection."""
-
-    store: JevMemoryStore | None = None
-    """Where facts live; defaults to the graph store, or memory in this process."""
-
-    user_key: str = "user_id"
-    """Runtime-context key naming the user; the thread id is used without it."""
-
-    max_items: int = 20
-    filter_relevant: bool = True
-    """Ask Jev which saved facts matter for this request; off sends every saved fact."""
 
 
 @dataclass(frozen=True)
@@ -296,10 +272,8 @@ class JevConfig:
     coding: CodingSettings | None = None
     """Required for `coding_router`, which sends requests that need code to this model."""
 
-    fast_path: FastPathSettings | None = None
     skills: SkillSettings = field(default_factory=SkillSettings)
     rag: RagSettings | None = None
-    memory: MemorySettings = field(default_factory=MemorySettings)
     tool_gate: ToolGateSettings = field(default_factory=ToolGateSettings)
     verify: VerifySettings = field(default_factory=VerifySettings)
     review: ReviewSettings = field(default_factory=ReviewSettings)
@@ -351,7 +325,6 @@ class JevConfig:
                 self.router is None or self.router.escalate_to is None,
                 "`router.escalate_to`",
             ),
-            FAST_PATH: (self.fast_path is None, "`fast_path` routes"),
             RAG_PASSAGES: (self.rag is None, "`rag` settings with retrieval tools"),
             RUN_REVIEW: (
                 self.review.on_review is None and self.review.on_run_end is None,
@@ -364,7 +337,7 @@ class JevConfig:
     def _check_names(self) -> None:
         unknown = sorted(set(self.blueprints) - set(BLUEPRINTS))
         if unknown:
-            msg = f"Unknown Jev blueprints: {', '.join(unknown)}"
+            msg = f"Unknown Jev blueprints: {', '.join(unknown)}{removed_note(unknown)}"
             raise ValueError(msg)
         invalid = sorted(k for k, v in self.blueprints.items() if v not in MODES)
         if invalid or self.default_mode not in MODES:
@@ -372,7 +345,10 @@ class JevConfig:
             raise ValueError(msg)
         unknown_models = sorted(set(self.models) - set(BLUEPRINTS))
         if unknown_models:
-            msg = f"`models` names unknown blueprints: {', '.join(unknown_models)}"
+            msg = (
+                f"`models` names unknown blueprints: {', '.join(unknown_models)}"
+                f"{removed_note(unknown_models)}"
+            )
             raise ValueError(msg)
         self._check_router()
         self._check_questions()

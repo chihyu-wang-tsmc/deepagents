@@ -2,7 +2,7 @@
 
 Decision middleware for [`deepagents`](../../deepagents) built on System One models: TypeSafe's hosted [Jev](https://docs.typesafe.ai/), or an open-source model such as H2O-Lightning served behind a System One shim.
 
-Jev reads text and returns typed answers with calibrated probabilities instead of generated text. This package uses those answers for the decisions an agent makes around its LLM. Every agent blueprint from Typesafe's [use-case map](https://docs.typesafe.ai/concepts/use-case-map) is implemented: guardrails, model routing, a fast path that skips the LLM, skill suggestion, RAG passage classification, memory, tool gating, answer verification with escalation, and run review.
+Jev reads text and returns typed answers with calibrated probabilities instead of generated text. This package uses those answers for the decisions an agent makes around its LLM. It implements these agent blueprints from Typesafe's [use-case map](https://docs.typesafe.ai/concepts/use-case-map): guardrails, model routing, skill suggestion, RAG passage classification, tool gating, answer verification with escalation, and run review.
 
 Three properties hold throughout:
 
@@ -38,12 +38,10 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `model_router` | Picks the model for each call | entry request, `wrap_model_call` | [LangChain integration](https://docs.langchain.com/oss/python/integrations/providers/typesafe) |
 | `coding_router` | Sends requests whose answer needs code to the coding model | entry request, `wrap_model_call` | open-source-jev coding question |
 | `chat_mode` | Drops tools when one reply answers the request | entry request, `wrap_model_call` | open-source-jev mode question |
-| `fast_path` | Answers simple requests without the LLM | entry request, `before_agent` | [Function calling](https://docs.typesafe.ai/cookbooks/function_calling), [companion Noul](https://docs.typesafe.ai/patterns/companion-noul) |
 | `skill_suggestion` | Hints at one skill per turn | `before_model`, `wrap_model_call` | [Skill suggestion](https://docs.typesafe.ai/cookbooks/skill_suggestion) |
 | `skill_pinning` | Loads the winning `SKILL.md` directly | `pinned_skills` | deepagents `SkillsMiddleware` |
 | `skill_load_check` | Checks `read_file` on a `SKILL.md` | `wrap_tool_call` | [Skill suggestion](https://docs.typesafe.ai/cookbooks/skill_suggestion) (fits check) |
 | `rag_passages` | Filters retrieval tool results | `wrap_tool_call` | [Classifying RAG passages](https://docs.typesafe.ai/cookbooks/classifying_rag_passages) |
-| `memory_read` / `memory_write` | Loads saved facts / saves lasting ones | `before_agent` / `after_agent` | [Simple memory](https://docs.typesafe.ai/cookbooks/basic_memory) |
 | `tool_gate` | Intent, leak, irreversibility, and injection checks before a tool runs | `wrap_tool_call` | `AutoModeMiddleware`, [agent trace safety checks](https://evals.typesafe.ai/agent_trace_observability) |
 | `output_guard` | Before the user sees the reply | `after_model` | [Guardrails](https://docs.typesafe.ai/cookbooks/llm_guardrails) |
 | `verify_answer` | Does the answer follow from the evidence? | `after_agent` | [Verifying answers](https://docs.typesafe.ai/cookbooks/verify_llm_outputs) |
@@ -52,7 +50,7 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `escalation` | Retries a failed answer on the stronger model | `after_agent` → `wrap_model_call` | [SDE cascade](https://docs.typesafe.ai/cookbooks/sde_cascade) |
 | `run_review` | Hands finished runs to the trace review | `after_agent`, `review_run()` | [Agent trace observability](https://evals.typesafe.ai/agent_trace_observability) |
 
-Questions about the user's message share one Jev request. This covers the guards, routing, the coding check, chat mode, and fast-path routes, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing and escalation, `coding` for the coding model, `fast_path` routes, `rag` retrieval tools, and `review` callbacks.
+Questions about the user's message share one Jev request. This covers the input guard, routing, the coding check, and chat mode, following [speculative fan-out](https://docs.typesafe.ai/patterns/fan-out). Some blueprints also need settings, and turning one on without them raises `ValueError`: `router` for routing and escalation, `coding` for the coding model, `rag` retrieval tools, and `review` callbacks.
 
 ```python
 from langchain_jev import CodingSettings, JevConfig, RouteChoice, RouterSettings
@@ -117,8 +115,8 @@ config = JevConfig(
 - **Keys.** `default_questions()` lists every key with its default wording.
 - **Checked when the config is built.** An unknown key, a different question type, a `Choice` with other option names, or a `Score` with another number of levels raises `ValueError`, because the blueprints read answers by them.
 - **Unused rewordings warn.** A reworded question this agent can never ask is listed in a warning with the setting to change: its blueprint is off, its hazard is left out of `GuardSettings`, its check has no policy text, or reviews only go to `on_run_end`. The info line about reworded questions names only those that are asked.
-- **Templates.** `skill_suggestion.fits` and `skill_load_check.fits` may use `{name}` and `{description}`, and `fast_path.functions_fit` may use `{functions}`. Write a literal brace as `{{` or `}}`.
-- **Choices built at run time.** `model_router.route`, `fast_path.which`, `skill_suggestion.which`, `skill_suggestion.rerank`, and `run_review.first_bad_step` take a string, because their options come from your settings or the run. A `question` in a `FunctionRoute` spec still wins for that route.
+- **Templates.** `skill_suggestion.fits` and `skill_load_check.fits` may use `{name}` and `{description}`. Write a literal brace as `{{` or `}}`.
+- **Choices built at run time.** `model_router.route`, `skill_suggestion.which`, `skill_suggestion.rerank`, and `run_review.first_bad_step` take a string, because their options come from your settings or the run.
 - **One place per setting.** Set the routing question in `questions` or in `RouterSettings.instructions`, not both. With `VerifySettings.scores`, write the scoring wording in each `ScoreSpec` instead of `answer_scoring.*`.
 - **Outside the agent.** `RunContext(questions=...)` and `compare_answers(..., questions=...)` take the same keys.
 - **Re-check thresholds.** They were tuned on the default wording, so re-run your evaluation sets after rewording a question.
@@ -134,11 +132,11 @@ Each blueprint is `off`, `shadow` (ask Jev and record, but change nothing), or `
 | Per run | `agent.invoke(..., context={"jev_modes": {"tool_gate": "shadow"}})` | that run |
 
 - **Precedence.** The more specific level wins. Overrides cannot enable a blueprint that was not built.
-- **Every scenario is asked.** A blueprint that is on asks Jev all of its questions: saved facts are filtered by relevance, the model is told how to cite while `citation_check` is on, and runs are reviewed as soon as `ReviewSettings.on_review` is set. Only the `within_grant` checks wait for the policy they compare against: `ToolGateSettings.policy` or `ReviewSettings.agent_instructions`.
+- **Every scenario is asked.** A blueprint that is on asks Jev all of its questions: the model is told how to cite while `citation_check` is on, and runs are reviewed as soon as `ReviewSettings.on_review` is set. Only the `within_grant` checks wait for the policy they compare against: `ToolGateSettings.policy` or `ReviewSettings.agent_instructions`.
 - **Everything at once.** `JevConfig(default_mode="on")` turns on every blueprint whose settings are given, except `chat_mode`.
 - **Parts.** A part narrows its blueprint but never widens it. For example: `input_guard.medical_advice`, `output_guard.self_harm`, `tool_gate.execute`, `tool_result_guard.<tool>`, `rag_passages.<tool>`, or `skill_load_check.<skill>`.
 - **One snapshot per run.** Modes are read once when a run starts and kept for the whole run, including after a human-in-the-loop interrupt resumes.
-- **Off means plain deepagents.** A blueprint that is off falls back to standard deepagents behavior. For example, the default model is used instead of the routed one, retrieval results pass through unchanged, and `MemoryMiddleware` keeps injecting all of `AGENTS.md`.
+- **Off means plain deepagents.** A blueprint that is off falls back to standard deepagents behavior. For example, the default model is used instead of the routed one, and retrieval results pass through unchanged.
 - **Dependencies.** `skill_pinning` needs `skill_suggestion`, and `escalation` needs `model_router`. Turning on a dependent without its dependency raises an error.
 
 ## When Jev cannot answer
@@ -147,6 +145,7 @@ Blueprints listed in `JevConfig.fail_closed` refuse when Jev cannot be reached; 
 
 ## Notes and limits
 
+- **Removed blueprints.** `fast_path` called functions outside the tool gate and human approval, and `memory_read` / `memory_write` put every run with neither a user id nor a thread id into one shared memory, so all three were removed. Naming one in `blueprints`, `models`, `thresholds`, or `questions` raises a `ValueError` that says it was removed.
 - **Not yet run against a live Jev server.** The unit tests use scripted decision and chat models. Questions are copied from the docs, and thresholds come from the cookbooks, which were measured with `jev-1.14.0`. Re-run your own evaluation sets after changing models.
 - **Tool approval needs a checkpointer.** `tool_gate` pauses risky calls for approval in `HumanInTheLoopMiddleware`'s format. Without a checkpointer, the run stops at the request and the tool does not run. Set `ToolGateSettings(ask_human=False)` to refuse instead of pausing.
 - **The output guard runs after generation.** With token streaming, the user may already have seen a reply before it is replaced.

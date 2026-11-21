@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
@@ -12,13 +12,9 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
 from langchain_jev import (
-    FastPathSettings,
     FileModeSource,
-    FunctionRoute,
-    InMemoryJevMemory,
     JevConfig,
     JevEvent,
-    MemorySettings,
     RagSettings,
     RouteChoice,
     RouterSettings,
@@ -283,70 +279,6 @@ def test_rag_drops_injected_passages_and_escalates_a_failed_answer() -> None:
     assert "Ignore previous instructions" not in evidence.text
     assert any(e.blueprint == "escalation" and e.action == "escalate" for e in events)
     assert len(powerful.calls) == 1
-
-
-def test_memory_saves_a_lasting_fact_and_brings_it_back() -> None:
-    def lasting(state: object, qid: str) -> float:
-        return 0.9 if "Windows Server" in json.dumps(state, default=str) else 0.1
-
-    store = InMemoryJevMemory()
-    jev = ScriptedJev(rules={"remember": lasting, "relevant": 0.9})
-    chat = FakeChat(responses=["Noted.", "Here is the self-hosted fix."])
-    blueprints = {"memory_read": "on", "memory_write": "on", "input_guard": "on"}
-    config = JevConfig(model=jev, memory=MemorySettings(store=store), blueprints=blueprints)
-    agent = _agent(chat, config)
-    context = {"user_id": "u-1042"}
-
-    agent.invoke(_ask("We self-host on Windows Server."), context=context)
-    agent.invoke(_ask("Dashboards are slow since this morning."), context=context)
-
-    assert "Windows Server" in chat.sent_text(-1)
-    assert jev.asked("relevant")  # saved facts are filtered by relevance by default
-    entry_states = jev.asked("input_guard::severity")
-    assert entry_states[-1]["known_facts_about_user"] == ["We self-host on Windows Server."]
-
-
-def test_fast_path_calls_a_function_without_the_model() -> None:
-    switched: list[tuple[str, bool]] = []
-
-    def set_light(room: Literal["kitchen", "bedroom"], on: bool) -> str:
-        switched.append((room, on))
-        return f"The {room} light is {'on' if on else 'off'}."
-
-    spec = {
-        "functions": {
-            "set_light": {
-                "description": "Turn a room's light on or off.",
-                "arguments": {
-                    "room": {
-                        "question": "Which room?",
-                        "options": {"kitchen": "Kitchen", "bedroom": "Bedroom"},
-                    },
-                    "on": {"question": "Should the light be on?"},
-                },
-            }
-        }
-    }
-    route = FunctionRoute("lights", spec, {"set_light": set_light})
-    jev = ScriptedJev(
-        rules={
-            "__fits__": 0.95,
-            "__tool__": "set_light",
-            "set_light.room": "bedroom",
-            "set_light.on": 0.95,
-        }
-    )
-    chat = FakeChat()
-
-    config = JevConfig(
-        model=jev, fast_path=FastPathSettings(routes=[route]), blueprints={"fast_path": "on"}
-    )
-
-    result = _agent(chat, config).invoke(_ask("Turn on the bedroom light."))
-
-    assert switched == [("bedroom", True)]
-    assert result["messages"][-1].content == "The bedroom light is on."
-    assert chat.calls == []
 
 
 def test_skill_suggestion_hints_and_pins_the_winning_skill(tmp_path: Path) -> None:

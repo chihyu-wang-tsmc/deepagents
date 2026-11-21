@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, cast
 from langchain_jev._question_use import asked_overrides, unasked_questions
 from langchain_jev._types import JevEvent, Mode
 from langchain_jev.classifiers import serialize_state
-from langchain_jev.memory_store import InMemoryJevMemory
 from langchain_jev.models import JevModel, as_jev_model
 from langchain_jev.question_book import QuestionBook
 from langchain_jev.switches import context_modes, resolve_modes
@@ -54,7 +53,6 @@ class JevRuntime:
         self.questions = QuestionBook(
             config.questions, route_instructions=router.instructions if router else None
         )
-        self.memory = InMemoryJevMemory()
         self._cache: OrderedDict[str, ClassifierResponse] = OrderedDict()
         self._lock = threading.Lock()
         self._report_setup()

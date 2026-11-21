@@ -2,13 +2,12 @@
 
 Order matters for three kinds of hook:
 
-- `before_agent` runs in list order: the run snapshot first, then memories (so the
-    entry request can see them), then the entry request, then the blueprints that
-    act on its answers.
+- `before_agent` runs in list order: the run snapshot first, then the entry request,
+    then the blueprints that act on its answers.
 - `wrap_tool_call` nests in list order: the tool gate wraps the skill-load check,
     which wraps passage classification, so a refused call never reaches retrieval.
 - `after_agent` runs in reverse: answer checks run first and may loop back to the
-    model; memory and review only run once the answer is final.
+    model; review only runs once the answer is final.
 """
 
 from __future__ import annotations
@@ -23,10 +22,7 @@ from langchain_jev._types import (
     CHAT_MODE,
     CITATION_CHECK,
     CODING_ROUTER,
-    FAST_PATH,
     INPUT_GUARD,
-    MEMORY_READ,
-    MEMORY_WRITE,
     MODEL_ROUTER,
     OUTPUT_GUARD,
     RAG_PASSAGES,
@@ -38,13 +34,11 @@ from langchain_jev._types import (
     VERIFY_ANSWER,
 )
 from langchain_jev.config import JevConfig
-from langchain_jev.middleware.fast_path import FastPathMiddleware
 from langchain_jev.middleware.guardrails import (
     InputGuardMiddleware,
     OutputGuardMiddleware,
     ToolResultGuardMiddleware,
 )
-from langchain_jev.middleware.memory import MemoryReadMiddleware, MemoryWriteMiddleware
 from langchain_jev.middleware.rag import RagPassagesMiddleware
 from langchain_jev.middleware.review import RunReviewMiddleware
 from langchain_jev.middleware.routing import (
@@ -73,7 +67,6 @@ if TYPE_CHECKING:
 
 _ENTRY: tuple[tuple[str, Callable[[JevRuntime], JevMiddleware]], ...] = (
     (INPUT_GUARD, InputGuardMiddleware),
-    (FAST_PATH, FastPathMiddleware),
     (MODEL_ROUTER, ModelRouterMiddleware),
     (CODING_ROUTER, CodingRouterMiddleware),
     (CHAT_MODE, ChatModeMiddleware),
@@ -86,7 +79,6 @@ _REST: tuple[tuple[str, Callable[[JevRuntime], JevMiddleware]], ...] = (
     (SKILL_LOAD_CHECK, SkillLoadCheckMiddleware),
     (RAG_PASSAGES, RagPassagesMiddleware),
     (RUN_REVIEW, RunReviewMiddleware),
-    (MEMORY_WRITE, MemoryWriteMiddleware),
 )
 _CHECKS = (VERIFY_ANSWER, CITATION_CHECK, ANSWER_SCORING)
 
@@ -102,16 +94,13 @@ def jev_middleware(
 
     Args:
         config: What to install; `JevConfig()` turns nothing on.
-        runtime: Share one runtime (its models, cache, and in-process memory)
-            between several stacks.
+        runtime: Share one runtime (its models and cache) between several stacks.
     """
     jev = runtime or JevRuntime(config or JevConfig())
     installed = jev.installed
     if not installed:
         return []
     stack: list[AgentMiddleware[Any, Any, Any]] = [JevRunMiddleware(jev)]
-    if MEMORY_READ in installed:
-        stack.append(MemoryReadMiddleware(jev))
     entry = [build(jev) for blueprint, build in _ENTRY if blueprint in installed]
     if entry:
         stack.append(JevEntryMiddleware(jev, [_participant(m) for m in entry]))

@@ -46,7 +46,7 @@ def test_default_mode_on_turns_on_every_blueprint_that_needs_no_settings() -> No
     assert "tool_gate" in installed
     assert "chat_mode" not in installed  # opt-in
     assert "model_router" not in installed  # needs router settings
-    assert "fast_path" not in installed  # needs routes
+    assert "rag_passages" not in installed  # needs retrieval tools
 
 
 def test_turning_on_a_blueprint_without_its_settings_is_an_error() -> None:
@@ -59,6 +59,15 @@ def test_unknown_blueprints_and_thresholds_are_errors() -> None:
         JevConfig(blueprints={"input_gaurd": "off"}).installed()
     with pytest.raises(ValueError, match="Unknown Jev thresholds"):
         JevRuntime(JevConfig(model=ScriptedJev(), thresholds={"input_guard.actoin": 0.9}))
+
+
+def test_removed_blueprints_are_named_in_the_error() -> None:
+    with pytest.raises(ValueError, match=r"memory_read was removed"):
+        JevConfig(blueprints={"memory_read": "on"}).installed()
+    with pytest.raises(ValueError, match=r"fast_path was removed"):
+        JevRuntime(JevConfig(model=ScriptedJev(), thresholds={"fast_path.min_fits": 0.7}))
+    with pytest.raises(ValueError, match=r"memory_write was removed"):
+        JevRuntime(JevConfig(model=ScriptedJev(), questions={"memory_write.remember": "Reworded."}))
 
 
 def test_a_dependent_follows_its_dependency_unless_asked_for() -> None:
@@ -120,7 +129,7 @@ def test_more_specific_mode_layers_win_and_cannot_add_blueprints() -> None:
 
     snapshot = resolve_modes(
         installed,
-        {"tool_gate": "shadow", "fast_path": "on"},
+        {"tool_gate": "shadow", "rag_passages": "on"},
         {"tool_gate": "off"},
     )
 

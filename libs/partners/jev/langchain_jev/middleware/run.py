@@ -85,7 +85,7 @@ class JevEntryMiddleware(JevMiddleware):
             return None
         response = cast(
             "ClassifierResponse | None",
-            (yield Ask(self._state(state, request), questions)),
+            (yield Ask(self._state(request), questions)),
         )
         if response is None:
             return {"jev_entry": {_FAILED: {}}}
@@ -100,13 +100,8 @@ class JevEntryMiddleware(JevMiddleware):
                 questions[f"{participant.blueprint}::{qid}"] = question
         return questions
 
-    def _state(self, state: JevState, request: str) -> dict[str, object]:
-        message = clip(request, self.jev.max_chars())
-        memories = state.get("jev_memories") or []
-        if not memories:
-            return {"message": message}
-        facts = [str(m.get("message", "")) for m in memories]
-        return {"message": message, "known_facts_about_user": facts}
+    def _state(self, request: str) -> dict[str, object]:
+        return {"message": clip(request, self.jev.max_chars())}
 
 
 def entry_answers(state: Mapping[str, object], blueprint: str) -> dict[str, Answer] | None:

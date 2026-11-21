@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 from langchain_jev._types import (
     BLUEPRINTS,
     INPUT_GUARD,
-    MEMORY_READ,
     OUTPUT_GUARD,
     RUN_REVIEW,
     TOOL_GATE,
@@ -76,10 +75,6 @@ def _missing_text(blueprint: str, name: str, config: JevConfig) -> str | None:
         (RUN_REVIEW, "within_grant"): (
             config.review.agent_instructions,
             "set ReviewSettings.agent_instructions",
-        ),
-        (MEMORY_READ, "relevant"): (
-            config.memory.filter_relevant,
-            "set MemorySettings.filter_relevant=True",
         ),
     }
     present, fix = needs.get((blueprint, name), (True, ""))

@@ -273,32 +273,6 @@ EVIDENCE_RULES = (
 )
 
 # ---------------------------------------------------------------------------
-# Memory: adapted from https://docs.typesafe.ai/cookbooks/basic_memory
-# (the cookbook asks about a support ticket; here the record is one agent turn)
-# ---------------------------------------------------------------------------
-
-REMEMBER = noul(
-    "In `request.message`, does the user state a lasting fact about themselves that "
-    "should change how their future, unrelated requests are handled? Count what the "
-    "user wrote in `request.message`. `assistant_reply` shows how the request was "
-    "answered, which may rely on things learned earlier: do not count anything it "
-    "says or implies.",
-    yes="Yes: in `request.message` the user states something about themselves that "
-    "stays true after this request, such as the product edition or operating system "
-    "they run, their plan or contract, or a standing preference.",
-    no="No: `request.message` only contains things specific to this one request or "
-    "moment, such as a one-off request, today's schedule, or the device they happen "
-    "to be typing on; or the lasting fact appears only in `assistant_reply`.",
-)
-
-MEMORY_RELEVANT = Noul(
-    instructions=(
-        "Is the saved fact in `memory` relevant to handling the user's current `request`?"
-    ),
-)
-"""Written for this package: filters saved facts before they reach the agent."""
-
-# ---------------------------------------------------------------------------
 # Tool gate: the default of LangChain's `AutoModeMiddleware`, the per-action
 # safety questions of https://evals.typesafe.ai/agent_trace_observability, and
 # two questions written for this package for the diagram's leak and
@@ -444,30 +418,6 @@ DEFAULT_SCORES: dict[str, Score] = {
         ],
     ),
 }
-
-# ---------------------------------------------------------------------------
-# Fast path: https://docs.typesafe.ai/cookbooks/function_calling with the
-# https://docs.typesafe.ai/patterns/companion-noul check
-# ---------------------------------------------------------------------------
-
-FUNCTION_ROUTE_INSTRUCTIONS = "Which function does this request call for?"
-
-
-FUNCTIONS_FIT = noul(
-    "Can this request be completely handled by calling exactly one of these functions: "
-    "{functions}?",
-    yes="one of the functions does what the request asks, with nothing left over",
-    no="the request needs something none of the functions does, needs more than "
-    "one step, or is not a request to run a function at all",
-)
-"""Template: `{functions}` is filled with the route's function names."""
-
-
-def functions_fit_question(names: list[str]) -> Noul:
-    """The companion Noul: whether any of the functions handles the request at all."""
-    text = str(FUNCTIONS_FIT.instructions).format(functions=", ".join(names))
-    return FUNCTIONS_FIT.model_copy(update={"instructions": text})
-
 
 # ---------------------------------------------------------------------------
 # Run review: https://evals.typesafe.ai/agent_trace_observability

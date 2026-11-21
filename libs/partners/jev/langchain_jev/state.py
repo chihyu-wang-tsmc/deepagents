@@ -34,9 +34,6 @@ class JevState(AgentState):
     jev_review: NotRequired[Annotated[str | None, PrivateStateAttr]]
     """The hazard an input guard sent to review, if any."""
 
-    jev_memories: NotRequired[Annotated[list[dict], PrivateStateAttr]]
-    """Facts saved for this user, loaded when the run starts."""
-
     jev_skill_hint: NotRequired[Annotated[str | None, PrivateStateAttr]]
     """The skill suggestion shown to the model in this run."""
 

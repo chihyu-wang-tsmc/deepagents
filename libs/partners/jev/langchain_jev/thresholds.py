@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from langchain_jev._types import removed_note
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -34,9 +36,6 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "coding_router.min_coding": 0.50,
     # https://docs.typesafe.ai/patterns/probability-routing: a costly action needs more
     "chat_mode.min_probability": 0.80,
-    # https://docs.typesafe.ai/patterns/companion-noul
-    "fast_path.min_fits": 0.70,
-    "fast_path.min_confidence": 0.70,
     # https://docs.typesafe.ai/cookbooks/skill_suggestion
     "skill_suggestion.action": 0.30,
     "skill_suggestion.named": 0.50,
@@ -48,9 +47,6 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "rag_passages.contradicts_min": 0.70,
     "rag_passages.relevant_min": 0.45,
     "rag_passages.evidence_min": 0.55,
-    # https://docs.typesafe.ai/cookbooks/basic_memory
-    "memory_write.remember_at": 0.50,
-    "memory_read.relevant_min": 0.50,
     # LangChain `AutoModeMiddleware` and the agent-trace safety checks use 0.5
     "tool_gate.risky": 0.50,
     "tool_gate.instructed_by_tool_output": 0.50,
@@ -74,7 +70,6 @@ NOUL_THRESHOLDS: frozenset[str] = frozenset(
         "output_guard.action",
         "tool_result_guard.injection",
         "coding_router.min_coding",
-        "fast_path.min_fits",
         "skill_suggestion.action",
         "skill_suggestion.named",
         "skill_suggestion.fits",
@@ -84,8 +79,6 @@ NOUL_THRESHOLDS: frozenset[str] = frozenset(
         "rag_passages.contradicts_min",
         "rag_passages.relevant_min",
         "rag_passages.evidence_min",
-        "memory_write.remember_at",
-        "memory_read.relevant_min",
         "tool_gate.risky",
         "tool_gate.instructed_by_tool_output",
         "tool_gate.user_asked_or_agreed",
@@ -108,7 +101,7 @@ def merge_thresholds(*layers: Mapping[str, float]) -> dict[str, float]:
     for layer in layers:
         unknown = sorted(set(layer) - set(DEFAULT_THRESHOLDS))
         if unknown:
-            msg = f"Unknown Jev thresholds: {', '.join(unknown)}"
+            msg = f"Unknown Jev thresholds: {', '.join(unknown)}{removed_note(unknown)}"
             raise ValueError(msg)
         merged.update(layer)
     return merged

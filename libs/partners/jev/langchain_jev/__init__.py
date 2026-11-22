@@ -4,7 +4,8 @@ Typesafe's agent use cases as deepagents middleware: guardrails, model routing,
 skill suggestion, RAG passage classification, tool gating, answer verification, and
 run review. Each blueprint can be switched off, on, or into shadow mode at build time,
 without a restart, or per run; the Jev model is swapped by name. `JevBlueprint` adds
-blueprints of your own at the same five stages the built-in ones use.
+blueprints of your own: asked at the five stages the built-in ones use, and acting at
+any later position in the loop.
 """
 
 from langchain_jev._runtime import JevRuntime
@@ -24,14 +25,22 @@ from langchain_jev.config import (
     VerifySettings,
 )
 from langchain_jev.custom import (
+    POSITIONS,
     STAGES,
     Action,
     AskHuman,
+    At,
+    DropTools,
     JevBlueprint,
     Mark,
+    Notify,
     NoTools,
     Redact,
     Refuse,
+    RewriteReply,
+    RewriteToolResult,
+    ShapeModelCall,
+    ShapeToolCall,
     Stage,
     SystemNote,
     UseModel,
@@ -62,10 +71,13 @@ from langchain_jev.switches import (
 
 __all__ = [
     "BLUEPRINTS",
+    "POSITIONS",
     "STAGES",
     "Action",
     "AskHuman",
+    "At",
     "CodingSettings",
+    "DropTools",
     "EnvModeSource",
     "FileModeSource",
     "GuardSettings",
@@ -79,16 +91,21 @@ __all__ = [
     "Mode",
     "ModeSource",
     "NoTools",
+    "Notify",
     "QuestionOverride",
     "RagSettings",
     "Redact",
     "Refuse",
     "ReviewSettings",
+    "RewriteReply",
+    "RewriteToolResult",
     "RouteChoice",
     "RouterSettings",
     "RunContext",
     "RunReview",
     "ScoreSpec",
+    "ShapeModelCall",
+    "ShapeToolCall",
     "SkillSettings",
     "Stage",
     "StaticModeSource",

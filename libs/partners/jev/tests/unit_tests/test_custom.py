@@ -27,6 +27,7 @@ from langchain_jev import (
     NoTools,
     Redact,
     Refuse,
+    RewriteReply,
     SystemNote,
     ToolGateSettings,
     UseModel,
@@ -146,6 +147,10 @@ def _calling(name: str, args: dict, *replies: str | AIMessage) -> FakeChat:
 
 
 EMAIL_ARGS = {"to": "partner@example.com", "body": "See you tomorrow."}
+
+
+def _never(answers: object, thresholds: object) -> None:
+    """A `decide` that never acts."""
 
 
 def _mentions(text: str):
@@ -382,16 +387,25 @@ def test_the_output_guard_acts_before_a_model_output_blueprint() -> None:
     assert jev.asked("promises") == []
 
 
-def test_decide_giving_an_action_the_stage_cannot_take_fails_loudly() -> None:
+@pytest.mark.parametrize(
+    ("stage", "action", "match"),
+    [
+        ("model_output", Mark("x"), "list 'final_answer' in `acts_at`"),
+        ("final_answer", SystemNote("x"), "cannot reach from stage 'final_answer'"),
+    ],
+)
+def test_decide_giving_an_action_it_cannot_take_fails_loudly(
+    stage: str, action: Mark | SystemNote, match: str
+) -> None:
     wrong = JevBlueprint(
         name="wrong",
-        stage="model_output",
+        stage=stage,  # ty: ignore[invalid-argument-type]
         questions={"promises": PROMISE},
-        decide=lambda a, t: Mark("x"),
+        decide=lambda a, t: action,
     )
     config = JevConfig(model=ScriptedJev(), blueprints={"wrong": "on"}, custom_blueprints=[wrong])
 
-    with pytest.raises(TypeError, match="does not apply at stage 'model_output'"):
+    with pytest.raises(TypeError, match=match):
         _agent(FakeChat(responses=["reply"]), config).invoke(_ask("hi"))
 
 
@@ -760,7 +774,29 @@ async def test_custom_blueprints_at_every_stage_work_with_ainvoke() -> None:
         ({"when": {"missing": 0.5}}, ValueError, "not a question"),
         ({"when": {"asks_confidential": 1.5}}, ValueError, "between 0 and 1"),
         ({"questions": {"asks_confidential": LANGUAGE}}, TypeError, "use `decide`"),
-        ({"act": Mark("x")}, TypeError, "does not apply at stage 'entry'"),
+        ({"act": SystemNote("x", at="tool_call")}, TypeError, "cannot act at 'tool_call'"),
+        ({"stage": "final_answer", "act": SystemNote("x")}, TypeError, "cannot reach"),
+        ({"act": Refuse(at="tool_call")}, ValueError, "needs `tools`"),
+        ({"act": Refuse(at="model_output", tools=["x"])}, ValueError, "takes no `tools`"),
+        ({"act": RewriteReply(str.upper)}, ValueError, "give `at`"),
+        ({"act": Refuse(at="nowhere")}, ValueError, "unknown position"),  # ty: ignore[invalid-argument-type]
+        (
+            {"stage": "tool_result", "tools": ["x"], "act": Refuse(at="before_agent")},
+            ValueError,
+            "before Jev is asked",
+        ),
+        ({"acts_at": ["model_call"]}, ValueError, "are for `decide`"),
+        (
+            {
+                "when": {},
+                "act": None,
+                "decide": _never,
+                "stage": "model_output",
+                "acts_at": ["before_agent"],
+            },
+            ValueError,
+            "before Jev is asked",
+        ),
         ({"decide": lambda a, t: None}, ValueError, "either `when` and `act`, or `decide`"),
         ({"tools": ["send_email"]}, ValueError, "only apply at the tool_call"),
         ({"stage": "tool_call"}, ValueError, "needs `tools`"),

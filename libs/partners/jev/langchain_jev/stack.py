@@ -10,10 +10,12 @@ Order matters for three kinds of hook:
 - `after_agent` runs in reverse: answer checks run first and mark the reply, then the
     note naming the failed checks is added, and review runs last, on the marked reply.
 
-A custom blueprint goes beside the built-in blueprints of its stage and acts after
-them, so a refusal from a built-in guard or the tool gate comes first. Hooks that run
-in reverse (`after_model`, the end of `wrap_tool_call`, `after_agent`) are therefore
-listed before the built-ins they follow.
+A custom blueprint's front goes beside the built-in blueprints of its stage, and each
+of its backs beside the built-ins of that position; both act after the built-ins, so
+a refusal from a built-in guard or the tool gate comes first. Hooks that run in
+reverse (`after_model`, the end of `wrap_tool_call`, `after_agent`) are therefore
+listed before the built-ins they follow. `model_call` backs sit inside the routers, so
+a model a custom blueprint picks wins.
 """
 
 from __future__ import annotations
@@ -114,6 +116,7 @@ def jev_middleware(
     if entry:
         stack.append(JevEntryMiddleware(jev, [_participant(m) for m in entry]))
         stack.extend(entry)
+    stack.extend(custom["model_call"])
     stack.extend(_rest(jev, custom))
     if any(check in installed for check in _CHECKS):
         stack.append(AnswerCheckMiddleware(jev))
@@ -132,6 +135,8 @@ def _rest(
         if blueprint == TOOL_GATE:
             yield from custom["tool_call"]
             yield from custom["tool_result"]
+        if blueprint == RAG_PASSAGES:
+            yield from custom["before_model"]
     checks = custom["final_answer"] or any(check in jev.installed for check in _CHECKS)
     if checks and jev.config.verify.annotate:
         yield AnswerNoteMiddleware(jev)

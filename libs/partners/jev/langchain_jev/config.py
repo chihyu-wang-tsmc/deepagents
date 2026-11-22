@@ -64,8 +64,16 @@ class GuardSettings:
     input_hazards: tuple[str, ...] = tuple(INPUT_BATTERY)
     """Hazards asked about each user message."""
 
+    input_history: int = 4
+    """Earlier user and assistant messages sent along with each user message.
+
+    A request spread over several turns is then judged as a whole; 0 sends the latest
+    message alone. They travel in the entry request, so routing, the coding check, and
+    chat mode see them too.
+    """
+
     output_hazards: tuple[str, ...] = tuple(OUTPUT_BATTERY)
-    """Hazards asked about each final reply."""
+    """Hazards asked about the text of each model reply, including text beside tool calls."""
 
     refusal_message: str = DEFAULT_REFUSAL
 
@@ -337,6 +345,7 @@ class JevConfig:
             )
             raise ValueError(msg)
         self._check_hazards()
+        self._check_history()
         self._check_router()
         self._check_questions()
 
@@ -372,6 +381,11 @@ class JevConfig:
                     f"{removed_note(unknown)}; choose from {sorted(known)}."
                 )
                 raise ValueError(msg)
+
+    def _check_history(self) -> None:
+        if self.guard.input_history < 0:
+            msg = f"`guard.input_history` must be 0 or more, not {self.guard.input_history}."
+            raise ValueError(msg)
 
     def _check_router(self) -> None:
         if self.router is None:

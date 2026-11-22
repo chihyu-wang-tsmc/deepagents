@@ -53,6 +53,37 @@ def final_answer(messages: Sequence[AnyMessage]) -> AIMessage | None:
     return None
 
 
+def latest_output(messages: Sequence[AnyMessage]) -> AIMessage | None:
+    """The model's newest message when it has text: a reply, or text beside tool calls."""
+    if not messages:
+        return None
+    last = messages[-1]
+    if isinstance(last, AIMessage) and last.text.strip():
+        return last
+    return None
+
+
+def earlier_turns(
+    messages: Sequence[AnyMessage], limit: int, max_chars: int
+) -> list[dict[str, str]]:
+    """Up to `limit` user and assistant messages before the latest user message.
+
+    Tool results, tool-call turns without text, and messages a middleware injected are
+    left out, and each text is clipped to `max_chars`.
+    """
+    latest = latest_human(messages)
+    if latest is None or limit <= 0:
+        return []
+    end = next(i for i in range(len(messages) - 1, -1, -1) if messages[i] is latest)
+    turns: list[dict[str, str]] = []
+    for message in messages[:end]:
+        role = "user" if is_user_message(message) else "assistant"
+        if not (role == "user" or isinstance(message, AIMessage)) or not message.text.strip():
+            continue
+        turns.append({"role": role, "text": clip(message.text, max_chars)})
+    return turns[-limit:]
+
+
 def new_tool_messages(messages: Sequence[AnyMessage]) -> list[ToolMessage]:
     """Tool results that arrived after the model's last message."""
     fresh: list[ToolMessage] = []

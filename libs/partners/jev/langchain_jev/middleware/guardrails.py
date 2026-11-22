@@ -18,7 +18,7 @@ from langgraph.types import Command
 from langchain_jev._messages import (
     append_system_text,
     clip,
-    final_answer,
+    latest_output,
     latest_request,
     new_tool_messages,
 )
@@ -343,7 +343,11 @@ def _rewrite(message: ToolMessage, probability: float, action: str) -> ToolMessa
 
 
 class OutputGuardMiddleware(_Guard):
-    """Screen the agent's final reply before the user sees it."""
+    """Screen the text of each model reply, including text written beside tool calls.
+
+    A turn whose text is blocked is replaced by the refusal as a whole, so its tool calls
+    never run, and the run ends. Turns with tool calls and no text are not asked about.
+    """
 
     blueprint = OUTPUT_GUARD
     battery = OUTPUT_BATTERY
@@ -360,7 +364,7 @@ class OutputGuardMiddleware(_Guard):
 
     def _flow(self, state: JevState, runtime: Runtime) -> Flow[dict[str, object] | None]:
         mode = self.mode(state, runtime)
-        reply = final_answer(state["messages"])
+        reply = latest_output(state["messages"])
         if (
             mode == "off"
             or reply is None

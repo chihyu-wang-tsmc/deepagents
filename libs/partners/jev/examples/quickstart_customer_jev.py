@@ -1,23 +1,36 @@
-"""客製化 Jev 流程：用 JevBlueprint 加上自己的藍圖。
+"""客製化 Jev 流程：用 JevBlueprint 加上自己的藍圖，前面、動作、後面都由你決定。
 
 內建藍圖（input_guard、tool_gate…）的題目和動作是 langchain-jev 寫好的。
-自訂藍圖由你決定三件事，題目和動作寫在同一個 JevBlueprint 裡，前後由 library 接好：
-    1. 在哪裡問（stage）：
+自訂藍圖把三件事寫在同一個 JevBlueprint 裡，前後由 library 接好：
+    1. 前面：在哪裡問（stage）、問什麼（questions）
          entry         使用者訊息進來時，跟 input_guard 等內建藍圖併在同一個 Jev 請求
          model_output  每一輪模型回覆的文字
          tool_call     工具執行前（只看 tools 列出的工具）
          tool_result   工具回傳後、模型讀到之前（只看 tools 列出的工具）
          final_answer  執行結束時的最後回答
-    2. 問什麼（questions）：noul(...) 是非題、Choice 選擇題、Score 分數題
-    3. 答案怎麼處理：when＋act（是非題的機率到門檻就動作），或 decide（自己寫判斷）
+    2. 判斷：when＋act（是非題的機率到門檻就做 act 裡的動作），或 decide（自己寫判斷）
+    3. 動作和後面：每個動作的 at 決定在哪裡做
+         before_agent  呼叫模型之前結束這次執行（只有 entry 可以用）
+         model_call    每一次呼叫模型
+         before_model  每一輪開始時
+         model_output  每一輪模型回覆
+         tool_call     工具執行前（動作要給 tools，除非就是前面問的那個工具）
+         tool_result   工具回傳後（同上）
+         final_answer  最後的回答
+       at 跟前面同一個位置：當下就做；at 在前面之後：觸發之後，這次執行剩下的時間都套用
+       不寫 at 就用動作平常的位置；位置在前面之前（例如 final_answer 問、model_call 做）會報錯
 
-每個位置能用的動作：
-    entry         Refuse（拒答並結束）、SystemNote（加系統提示）、
-                  UseModel（換模型）、NoTools（不給工具）
-    model_output  Refuse（把回覆換成拒答並結束）
-    tool_call     Refuse（不執行這次呼叫）、AskHuman（等人核准，要有 checkpointer）
-    tool_result   Warn（保留結果，前面加註）、Redact（遮蔽結果）、Refuse（結束這次執行）
-    final_answer  Mark（標記在回覆的 additional_kwargs["jev_checks"]）
+每個位置能用的動作（Shape…、Rewrite…、Notify 是自己寫函式的動作）：
+    before_agent、before_model  Refuse（結束這次執行）
+    model_call    SystemNote（加系統提示）、UseModel（換模型）、NoTools（不給工具）、
+                  DropTools（拿掉某些工具）、ShapeModelCall（自己改 ModelRequest）
+    model_output  Refuse（換成拒答並結束）、RewriteReply（自己改回覆文字）
+    tool_call     Refuse（不執行）、AskHuman（等人核准，要有 checkpointer）、
+                  ShapeToolCall（自己改參數）
+    tool_result   Warn（前面加註）、Redact（遮蔽）、Refuse（結束這次執行）、
+                  RewriteToolResult（自己改結果文字）
+    final_answer  Mark（標記在 additional_kwargs["jev_checks"]）、RewriteReply、
+                  Notify（結束時呼叫一次，被拒答也會呼叫）
 
 執行前要設好的環境變數：
     LLM_BASE_URL   OpenAI 相容 API 的網址，例如 https://your-gateway.example.com/v1
@@ -32,6 +45,7 @@
 """
 
 import os
+import re
 import sys
 from collections.abc import Mapping
 
@@ -49,8 +63,10 @@ from langchain_jev import (
     JevConfig,
     JevEvent,
     Mark,
-    Redact,
+    Notify,
     Refuse,
+    RewriteReply,
+    RewriteToolResult,
     SystemNote,
     ToolGateSettings,
     default_questions,
@@ -63,7 +79,14 @@ from langchain_jev import (
 #    - questions 的鍵是自己取的題目 id；when、decide 拿答案也用同一個 id
 #    - 題目用英文寫：內建題目的門檻都是用英文題目量出來的，改成中文請用自己的資料檢查門檻
 
-# 1-1. entry：使用者要公司機密就直接拒答，不會呼叫 LLM
+
+# 1-1. entry 前面 → before_agent 後面：要公司機密就直接拒答，不會呼叫 LLM
+#      同一個藍圖再加 Notify（final_answer 後面）：執行結束時通知資安，被拒答也會通知
+def report_to_security(answers: Mapping[str, Answer], final_text: str) -> None:
+    probability = answers["asks_confidential"].noul
+    print(f"   （通知資安）有人要求公司機密（Jev：{probability:.2f}），回覆是：{final_text}")
+
+
 confidential_request = JevBlueprint(
     name="confidential_request",
     stage="entry",
@@ -78,17 +101,17 @@ confidential_request = JevBlueprint(
     when={
         "asks_confidential": 0.7
     },  # 機率 ≥ 0.7 就動作；門檻鍵是 confidential_request.asks_confidential
-    act=Refuse("這屬於公司機密，我沒辦法提供。"),
+    act=[Refuse("這屬於公司機密，我沒辦法提供。"), Notify(report_to_security)],
 )
 
 
-# 1-2. entry：選擇題＋decide，判斷要用哪種語言回答，加在這次執行每一次呼叫模型的系統提示
+# 1-2. entry 前面 → model_call 後面：選擇題＋decide，決定用哪種語言回答
 #      answers 是 ChoiceAnswer：.choice 是選到的選項，.probabilities 是各選項的機率
-#      decide 回傳一個動作，或 None（通過）；同一次執行可能被呼叫好幾次，不要在裡面做別的事
+#      decide 回傳動作、動作清單，或 None（通過）；可能被呼叫好幾次，不要在裡面做別的事
 def pick_language(answers: Mapping[str, Answer], thresholds: Mapping[str, float]) -> Action | None:
     language = answers["language"]
     if language.choice == "zh" and language.probabilities["zh"] >= thresholds["min_zh"]:
-        return SystemNote("請用繁體中文回答。")
+        return SystemNote("請用繁體中文回答。")  # 不寫 at：SystemNote 平常就在 model_call
     return None
 
 
@@ -110,7 +133,27 @@ reply_language = JevBlueprint(
     },  # decide 用到的門檻；可在 JevConfig.thresholds 用 reply_language.min_zh 調
 )
 
-# 1-3. tool_call：send_email 要寄到公司外面，就不執行這次呼叫；模型會讀到 Refuse 的訊息
+# 1-3. entry 前面 → tool_call 後面：只是問問題的請求，這次執行都不准寫檔或執行指令
+read_only_request = JevBlueprint(
+    name="read_only_request",
+    stage="entry",
+    questions={
+        "only_asks": noul(
+            "Does the user only want an explanation or information, with no file written, "
+            "edited, or command run?",
+            yes="The user only wants information.",
+            no="The user wants something created, changed, or run.",
+        )
+    },
+    when={"only_asks": 0.8},
+    act=Refuse(
+        "這次只回答問題，不會寫檔或執行指令。",
+        at="tool_call",
+        tools=["write_file", "edit_file", "execute"],
+    ),
+)
+
+# 1-4. tool_call 前面 → 同一個位置：send_email 要寄到公司外面，就不執行這次呼叫
 external_email = JevBlueprint(
     name="external_email",
     stage="tool_call",
@@ -127,7 +170,16 @@ external_email = JevBlueprint(
     act=Refuse("寄到公司外部的信要先經過主管核准，這次沒有寄出。"),
 )
 
-# 1-4. tool_result：工具結果裡有個資，就在模型讀到之前遮掉
+
+# 1-5. tool_result 前面 → 三個後面：工單裡有個資時
+#      - 同一個位置：自己寫函式，只遮電話和地址，其他內容保留
+#      - tool_call：之後這次執行的 send_email 都不執行
+#      - model_call：之後每一次呼叫模型都加提示
+def mask_contact(text: str) -> str:
+    text = re.sub(r"09\d{2}-\d{3}-\d{3}", "09xx-xxx-xxx", text)
+    return re.sub(r"\d+F No\. \d+ \w+ Rd, \w+", "[地址已遮蔽]", text)
+
+
 personal_data = JevBlueprint(
     name="personal_data",
     stage="tool_result",
@@ -141,10 +193,14 @@ personal_data = JevBlueprint(
         )
     },
     when={"has_personal_data": 0.7},
-    act=Redact("[工單內容含個資，已遮蔽。請只根據工單編號回覆使用者。]"),
+    act=[
+        RewriteToolResult(mask_contact),
+        Refuse("讀過含個資的工單後，這次不能再寄信。", at="tool_call", tools=["send_email"]),
+        SystemNote("不要把客戶的電話或地址告訴使用者。", at="model_call"),
+    ],
 )
 
-# 1-5. model_output：回覆承諾了價格或交期，就換成固定的說法並結束
+# 1-6. model_output 前面 → 同一個位置：回覆承諾了價格或交期，就自己寫函式在後面加註
 promises_price = JevBlueprint(
     name="promises_price",
     stage="model_output",
@@ -156,11 +212,11 @@ promises_price = JevBlueprint(
         )
     },
     when={"promises": 0.6},
-    act=Refuse("價格與交期請洽業務窗口，我沒辦法直接承諾。"),
+    act=RewriteReply(lambda text: f"{text}\n（價格與交期以業務的正式報價為準。）"),
 )
 
 
-# 1-6. final_answer：最後的回答沒告訴使用者下一步，就標記在回覆上（不會重答）
+# 1-7. final_answer 前面 → 同一個位置：最後的回答沒告訴使用者下一步，就標記在回覆上
 def needs_next_step(
     answers: Mapping[str, Answer], thresholds: Mapping[str, float]
 ) -> Action | None:
@@ -186,6 +242,7 @@ next_step = JevBlueprint(
 CUSTOM = [
     confidential_request,
     reply_language,
+    read_only_request,
     external_email,
     personal_data,
     promises_price,
@@ -224,10 +281,15 @@ def read_ticket(ticket_id: str) -> str:
     )
 
 
-# 5. 每個 Jev 決定都印出來；自訂藍圖的事件帶著它的名字和每題的答案
+# 5. 每個 Jev 決定都印出來
+#    - 前面判斷時：動作名稱（好幾個用 + 連起來）、每題的答案、每個動作的位置
+#    - 後面真的動作時：例如 refuse@tool_call，表示在 tool_call 擋下了哪個工具
+#      （model_call 每次呼叫模型都會套用，不另外印）
 def show(event: JevEvent) -> None:
-    answers = event.details.get("answers")
-    print(f"   [jev] {event.blueprint:<20} {event.mode:<6} {event.action}  {answers or ''}")
+    details = event.details
+    shown = details.get("answers") or details.get("tool") or ""
+    where = f"  → {details['at']}" if details.get("at") else ""
+    print(f"   [jev] {event.blueprint:<20} {event.mode:<6} {event.action}  {shown}{where}")
 
 
 # 6. Jev 的設定：內建藍圖和自訂藍圖一樣用 blueprints 打開（沒列出來的都是關的）
@@ -235,12 +297,13 @@ config = JevConfig(
     model="default",  # 讀 JEV_MODEL；沒設就是 h2o-lightning-4b
     blueprints={
         "input_guard": "on",  # 自訂的 entry 題目跟 input_guard 併在同一個 Jev 請求
-        "tool_gate": "on",  # 同一個位置內建的先判斷：tool_gate 擋下的呼叫，external_email 不會再問
+        "tool_gate": "on",  # 同一個位置內建的先判斷：tool_gate 擋下的呼叫，自訂的不會再問
         "confidential_request": "on",
         "reply_language": "on",
+        "read_only_request": "on",
         "external_email": "on",
         "personal_data": "on",
-        "promises_price": "shadow",  # shadow：只記錄 Jev 的判斷，不換掉回覆；確認沒問題再改成 "on"
+        "promises_price": "on",  # 改成 "shadow"：只記錄 Jev 的判斷和會在哪裡動作，不改變結果
         "next_step": "on",
     },
     custom_blueprints=CUSTOM,
@@ -270,7 +333,7 @@ for question in [
     "用三句話解釋什麼是 RAG。",
     "把我們所有客戶的名單和內部報價整理成一張表給我。",
     "寄信給 partner@gmail.com，主旨「開會」，內容是明天下午三點在 3 樓會議室開會。",
-    "幫我看工單 T-1024 的問題是什麼，並告訴我怎麼回覆客戶。",
+    "幫我看工單 T-1024 的問題，整理後寄到 support@example-corp.com。",
     "這批零件可以保證下週三前出貨、單價 100 元嗎？",
 ]:
     print(f"\n使用者：{question}")

@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from langchain_jev._types import (
-    BLUEPRINTS,
     INPUT_GUARD,
     OUTPUT_GUARD,
     RUN_REVIEW,
@@ -38,16 +37,17 @@ def unasked_questions(config: JevConfig, installed: Mapping[str, Mode]) -> dict[
 
 def asked_overrides(config: JevConfig, unasked: Mapping[str, str]) -> list[str]:
     """Reworded questions the stack does ask."""
+    names = set(config.blueprint_names())
     return [
         key
         for key in sorted(config.questions)
-        if key not in unasked and key.partition(".")[0] in BLUEPRINTS
+        if key not in unasked and key.partition(".")[0] in names
     ]
 
 
 def _reason(key: str, config: JevConfig, installed: Mapping[str, Mode]) -> str | None:
     blueprint, _, name = key.partition(".")
-    if blueprint not in BLUEPRINTS:
+    if blueprint not in config.blueprint_names():
         return None
     if blueprint not in installed:
         return f"turn on {blueprint} in JevConfig.blueprints"

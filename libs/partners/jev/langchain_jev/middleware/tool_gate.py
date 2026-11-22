@@ -114,13 +114,7 @@ class ToolGateMiddleware(JevMiddleware):
         }
 
     def _state(self, request: ToolCallRequest) -> dict[str, object]:
-        call = request.tool_call
-        state: dict[str, object] = {
-            "messages": list(request.state.get("messages", []))[-_RECENT:],
-            "tool_call": {"id": call["id"], "name": call["name"], "args": call["args"]},
-        }
-        if request.tool is not None and request.tool.description:
-            state["tool_description"] = request.tool.description
+        state = call_state(request)
         if self.jev.config.tool_gate.policy:
             state["agent_instructions"] = self.jev.config.tool_gate.policy
         return state
@@ -146,47 +140,65 @@ class ToolGateMiddleware(JevMiddleware):
         return action, reasons, nouls
 
     def _ask_human(self, request: ToolCallRequest, reasons: list[str]) -> ToolMessage | None:
-        """Pause for approval in the format of LangChain's `HumanInTheLoopMiddleware`."""
-        call = request.tool_call
         description = f"Jev flagged this call ({', '.join(reasons)}); approve to run it."
-        decision = interrupt(
-            {
-                "action_requests": [
-                    {
-                        "name": call["name"],
-                        "args": call["args"],
-                        "description": description,
-                    }
-                ],
-                "review_configs": [
-                    {
-                        "action_name": call["name"],
-                        "allowed_decisions": ["approve", "reject"],
-                    }
-                ],
-            }
-        )["decisions"][0]
-        if decision.get("type") == "approve":
-            return None
-        message = (
-            decision.get("message")
-            or f"A reviewer rejected the call to `{call['name']}`; it was not run."
-        )
-        return _refusal(request, reasons, message)
+        rejection = ask_approval(request, description)
+        return None if rejection is None else _refusal(request, reasons, rejection)
+
+
+def call_state(request: ToolCallRequest) -> dict[str, object]:
+    """What Jev reads about one tool call: the call, its tool, and the recent messages."""
+    call = request.tool_call
+    state: dict[str, object] = {
+        "messages": list(request.state.get("messages", []))[-_RECENT:],
+        "tool_call": {"id": call["id"], "name": call["name"], "args": call["args"]},
+    }
+    if request.tool is not None and request.tool.description:
+        state["tool_description"] = request.tool.description
+    return state
+
+
+def ask_approval(request: ToolCallRequest, description: str) -> str | None:
+    """Pause for approval in the format of LangChain's `HumanInTheLoopMiddleware`.
+
+    Returns:
+        `None` when the reviewer approves, otherwise the text the model reads instead.
+    """
+    call = request.tool_call
+    decision = interrupt(
+        {
+            "action_requests": [
+                {"name": call["name"], "args": call["args"], "description": description}
+            ],
+            "review_configs": [
+                {"action_name": call["name"], "allowed_decisions": ["approve", "reject"]}
+            ],
+        }
+    )["decisions"][0]
+    if decision.get("type") == "approve":
+        return None
+    return (
+        decision.get("message")
+        or f"A reviewer rejected the call to `{call['name']}`; it was not run."
+    )
 
 
 def _refusal(
     request: ToolCallRequest, reasons: list[str], message: str | None = None
 ) -> ToolMessage:
-    call = request.tool_call
     content = message or (
-        f"The call to `{call['name']}` was not run: Jev flagged it ({', '.join(reasons)}). "
-        "Ask the user before trying anything similar."
+        f"The call to `{request.tool_call['name']}` was not run: Jev flagged it "
+        f"({', '.join(reasons)}). Ask the user before trying anything similar."
     )
+    return refused_call(request, content, TOOL_GATE)
+
+
+def refused_call(request: ToolCallRequest, content: str, blueprint: str) -> ToolMessage:
+    """The result the model reads in place of a tool call a Jev blueprint did not run."""
+    call = request.tool_call
     return ToolMessage(
         content=content,
         tool_call_id=call["id"],
         name=call["name"],
         status="error",
-        additional_kwargs={JEV_MARK: TOOL_GATE},
+        additional_kwargs={JEV_MARK: blueprint},
     )

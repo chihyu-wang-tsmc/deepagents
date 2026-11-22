@@ -15,13 +15,15 @@ from langchain_jev._types import (
     MODES,
     OUTPUT_GUARD,
     RAG_PASSAGES,
+    REMOVED_BLUEPRINTS,
     RUN_REVIEW,
     TOOL_GATE,
     JevEvent,
     Mode,
     removed_note,
 )
-from langchain_jev.question_book import QuestionBook
+from langchain_jev.custom import JevBlueprint
+from langchain_jev.question_book import QUESTION_GROUPS, QuestionBook
 from langchain_jev.questions import (
     DEFAULT_ROUTE_CRITERIA,
     INPUT_BATTERY,
@@ -229,6 +231,9 @@ class JevConfig:
             mode_source=FileModeSource("jev_modes.json"),
         )
         ```
+
+    Blueprints of your own go in `custom_blueprints` and are turned on by name in
+    `blueprints`, like the built-in ones; see `JevBlueprint`.
     """
 
     model: ModelSpec = "default"
@@ -275,17 +280,25 @@ class JevConfig:
     tool_gate: ToolGateSettings = field(default_factory=ToolGateSettings)
     verify: VerifySettings = field(default_factory=VerifySettings)
     review: ReviewSettings = field(default_factory=ReviewSettings)
+    custom_blueprints: Sequence[JevBlueprint] = ()
+    """Blueprints of your own. Each is off until `blueprints` turns it on by its name."""
+
+    def blueprint_names(self) -> tuple[str, ...]:
+        """Every blueprint this configuration can name: the built-ins, then yours."""
+        return (*BLUEPRINTS, *(spec.name for spec in self.custom_blueprints))
 
     def installed(self) -> dict[str, Mode]:
         """Blueprints that will be built, with their build-time modes.
 
         Raises:
             ValueError: If the configuration names unknown blueprints or modes, turns
-                on a blueprint without the settings it needs, or breaks a dependency.
+                on a blueprint without the settings it needs, breaks a dependency, or
+                gives a custom blueprint a name that is taken.
+            TypeError: If `custom_blueprints` holds something other than a `JevBlueprint`.
         """
         self._check_names()
         modes: dict[str, Mode] = {}
-        for blueprint in BLUEPRINTS:
+        for blueprint in self.blueprint_names():
             mode = self._build_mode(blueprint)
             if mode != "off":
                 modes[blueprint] = mode
@@ -329,7 +342,9 @@ class JevConfig:
         return what if absent else None
 
     def _check_names(self) -> None:
-        unknown = sorted(set(self.blueprints) - set(BLUEPRINTS))
+        self._check_custom()
+        names = set(self.blueprint_names())
+        unknown = sorted(set(self.blueprints) - names)
         if unknown:
             msg = f"Unknown Jev blueprints: {', '.join(unknown)}{removed_note(unknown)}"
             raise ValueError(msg)
@@ -337,7 +352,7 @@ class JevConfig:
         if invalid or self.default_mode not in MODES:
             msg = f"Jev modes must be one of {sorted(MODES)}; check {invalid}."
             raise ValueError(msg)
-        unknown_models = sorted(set(self.models) - set(BLUEPRINTS))
+        unknown_models = sorted(set(self.models) - names)
         if unknown_models:
             msg = (
                 f"`models` names unknown blueprints: {', '.join(unknown_models)}"
@@ -349,8 +364,26 @@ class JevConfig:
         self._check_router()
         self._check_questions()
 
+    def _check_custom(self) -> None:
+        taken = set(BLUEPRINTS) | REMOVED_BLUEPRINTS | QUESTION_GROUPS
+        seen: set[str] = set()
+        for spec in self.custom_blueprints:
+            if not isinstance(spec, JevBlueprint):
+                msg = f"`custom_blueprints` takes JevBlueprint objects, got {type(spec).__name__}."
+                raise TypeError(msg)
+            if spec.name in taken:
+                msg = (
+                    f"Custom Jev blueprint {spec.name!r} uses a name langchain-jev already "
+                    f"uses; choose another.{removed_note([spec.name])}"
+                )
+                raise ValueError(msg)
+            if spec.name in seen:
+                msg = f"Two custom Jev blueprints are named {spec.name!r}."
+                raise ValueError(msg)
+            seen.add(spec.name)
+
     def _check_questions(self) -> None:
-        QuestionBook(self.questions)
+        QuestionBook(self.questions, custom=self.custom_blueprints)
         custom_route = (
             self.router is not None and self.router.instructions != MODEL_ROUTE_INSTRUCTIONS
         )

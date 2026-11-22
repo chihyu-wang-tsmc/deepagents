@@ -7,8 +7,13 @@ Order matters for three kinds of hook:
 - `wrap_tool_call` nests in list order: the tool gate wraps the tool-result guard,
     which wraps the skill-load check and passage classification, so a refused call
     never runs, and the guard screens what the inner layers return.
-- `after_agent` runs in reverse: answer checks run first and mark the reply; review
-    runs after them, on the marked reply.
+- `after_agent` runs in reverse: answer checks run first and mark the reply, then the
+    note naming the failed checks is added, and review runs last, on the marked reply.
+
+A custom blueprint goes beside the built-in blueprints of its stage and acts after
+them, so a refusal from a built-in guard or the tool gate comes first. Hooks that run
+in reverse (`after_model`, the end of `wrap_tool_call`, `after_agent`) are therefore
+listed before the built-ins they follow.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from langchain_jev._types import (
     VERIFY_ANSWER,
 )
 from langchain_jev.config import JevConfig
+from langchain_jev.middleware.custom import CustomBlueprintMiddleware, custom_middleware
 from langchain_jev.middleware.guardrails import (
     InputGuardMiddleware,
     OutputGuardMiddleware,
@@ -57,10 +63,10 @@ from langchain_jev.middleware.skills import (
     SkillSuggestionMiddleware,
 )
 from langchain_jev.middleware.tool_gate import ToolGateMiddleware
-from langchain_jev.middleware.verify import AnswerCheckMiddleware
+from langchain_jev.middleware.verify import AnswerCheckMiddleware, AnswerNoteMiddleware
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from langchain.agents.middleware.types import AgentMiddleware
 
@@ -101,15 +107,35 @@ def jev_middleware(
     installed = jev.installed
     if not installed:
         return []
+    custom = custom_middleware(jev)
     stack: list[AgentMiddleware[Any, Any, Any]] = [JevRunMiddleware(jev)]
     entry = [build(jev) for blueprint, build in _ENTRY if blueprint in installed]
+    entry.extend(custom["entry"])
     if entry:
         stack.append(JevEntryMiddleware(jev, [_participant(m) for m in entry]))
         stack.extend(entry)
-    stack.extend(build(jev) for blueprint, build in _REST if blueprint in installed)
+    stack.extend(_rest(jev, custom))
     if any(check in installed for check in _CHECKS):
         stack.append(AnswerCheckMiddleware(jev))
     return stack
+
+
+def _rest(
+    jev: JevRuntime, custom: Mapping[str, list[CustomBlueprintMiddleware]]
+) -> Iterator[JevMiddleware]:
+    """The blueprints after the entry ones, with each custom stage beside its built-ins."""
+    for blueprint, build in _REST:
+        if blueprint == OUTPUT_GUARD:
+            yield from custom["model_output"]
+        if blueprint in jev.installed:
+            yield build(jev)
+        if blueprint == TOOL_GATE:
+            yield from custom["tool_call"]
+            yield from custom["tool_result"]
+    checks = custom["final_answer"] or any(check in jev.installed for check in _CHECKS)
+    if checks and jev.config.verify.annotate:
+        yield AnswerNoteMiddleware(jev)
+    yield from custom["final_answer"]
 
 
 def register_jev_profile(providers: Sequence[str], config: JevConfig | None = None) -> JevRuntime:

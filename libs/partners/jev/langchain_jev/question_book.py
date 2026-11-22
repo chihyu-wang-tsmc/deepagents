@@ -20,7 +20,8 @@ Three kinds of scenario take different overrides:
     are choices whose options come from your configuration or the run, so they only
     take a string.
 
-`default_questions()` lists every key with its default wording.
+`default_questions()` lists every key with its default wording. A custom blueprint's
+questions take overrides too, keyed `<blueprint name>.<question id>`.
 """
 
 from __future__ import annotations
@@ -35,7 +36,9 @@ from langchain_jev import questions as q
 from langchain_jev._types import removed_note
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
+
+    from langchain_jev.custom import JevBlueprint
 
 FullQuestion: TypeAlias = Noul | Choice | Score
 QuestionOverride: TypeAlias = str | Noul | Choice | Score
@@ -80,6 +83,11 @@ INSTRUCTIONS: dict[str, str] = {
 }
 """Scenarios whose options are only known at run time: only the instructions change."""
 
+QUESTION_GROUPS: frozenset[str] = frozenset(
+    key.partition(".")[0] for key in (*QUESTIONS, *INSTRUCTIONS)
+)
+"""Every name before the dot in a key, including standalone functions like `compare_answers`."""
+
 TEMPLATE_FIELDS: dict[str, tuple[str, ...]] = {
     "skill_suggestion.fits": ("name", "description"),
     "skill_load_check.fits": ("name", "description"),
@@ -87,18 +95,20 @@ TEMPLATE_FIELDS: dict[str, tuple[str, ...]] = {
 """Placeholders each template's instructions may use."""
 
 
-def default_questions() -> dict[str, FullQuestion | str]:
+def default_questions(*, custom: Sequence[JevBlueprint] = ()) -> dict[str, FullQuestion | str]:
     """Every scenario key with its default wording, to see what can be reworded.
+
+    Args:
+        custom: Custom blueprints whose questions to list after the built-in ones.
 
     Returns:
         Questions for complete-question scenarios and plain instructions for
             instructions-only ones. The values are copies, so changing them does not
             change the defaults.
     """
-    full: dict[str, FullQuestion | str] = {
-        key: question.model_copy(deep=True) for key, question in QUESTIONS.items()
-    }
-    return {**full, **INSTRUCTIONS}
+    built_in = {key: question.model_copy(deep=True) for key, question in QUESTIONS.items()}
+    yours = {key: q.model_copy(deep=True) for key, q in _custom_questions(custom).items()}
+    return {**built_in, **INSTRUCTIONS, **yours}
 
 
 class QuestionBook:
@@ -109,6 +119,7 @@ class QuestionBook:
         overrides: Mapping[str, QuestionOverride] | None = None,
         *,
         route_instructions: str | None = None,
+        custom: Sequence[JevBlueprint] = (),
     ) -> None:
         """Check `overrides` and apply them.
 
@@ -116,15 +127,18 @@ class QuestionBook:
             overrides: New wording by scenario key.
             route_instructions: The routing question from `RouterSettings`, used
                 unless `overrides` rewords `model_router.route`.
+            custom: Custom blueprints, whose questions are asked and reworded like
+                the built-in ones.
 
         Raises:
             ValueError: If a key is unknown, or an override changes a question's type,
                 option names, or number of levels, or uses an unknown placeholder.
         """
         given = dict(overrides or {})
-        _check_keys(given)
+        defaults = {**QUESTIONS, **_custom_questions(custom)}
+        _check_keys(given, defaults)
         self.overridden: tuple[str, ...] = tuple(sorted(given))
-        self._questions = {key: _reword(key, d, given.get(key)) for key, d in QUESTIONS.items()}
+        self._questions = {key: _reword(key, d, given.get(key)) for key, d in defaults.items()}
         self._instructions = {key: _text(key, d, given.get(key)) for key, d in INSTRUCTIONS.items()}
         if route_instructions is not None and "model_router.route" not in given:
             self._instructions["model_router.route"] = route_instructions
@@ -148,8 +162,12 @@ def default_book() -> QuestionBook:
     return QuestionBook()
 
 
-def _check_keys(given: Mapping[str, QuestionOverride]) -> None:
-    unknown = sorted(set(given) - set(QUESTIONS) - set(INSTRUCTIONS))
+def _custom_questions(custom: Sequence[JevBlueprint]) -> dict[str, FullQuestion]:
+    return {key: q for spec in custom for key, q in spec.default_questions().items()}
+
+
+def _check_keys(given: Mapping[str, QuestionOverride], known: Mapping[str, FullQuestion]) -> None:
+    unknown = sorted(set(given) - set(known) - set(INSTRUCTIONS))
     if unknown:
         msg = (
             f"Unknown Jev question keys: {', '.join(unknown)}.{removed_note(unknown)} "

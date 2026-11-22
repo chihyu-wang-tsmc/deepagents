@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, cast
 
 from langchain_jev._question_use import asked_overrides, unasked_questions
 from langchain_jev._types import (
-    BLUEPRINTS,
     CITATION_CHECK,
     RAG_PASSAGES,
     VERIFY_ANSWER,
@@ -30,7 +29,7 @@ from langchain_jev.thresholds import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from langchain_core.decisions import BaseDecisionModel, ClassifierResponse, Question
     from langchain_core.decisions.types import ClassifierRequest, State
@@ -50,6 +49,8 @@ class JevRuntime:
         """Validate `config` and build its decision models."""
         self.config = config
         self.installed: dict[str, Mode] = config.installed()
+        self.names: frozenset[str] = frozenset(config.blueprint_names())
+        """Every blueprint this runtime knows by name, custom ones included."""
         self.model: JevModel = as_jev_model(config.model)
         self._default = self.model.factory()
         self._overrides = {bp: as_jev_model(spec) for bp, spec in config.models.items()}
@@ -58,13 +59,17 @@ class JevRuntime:
         self.thresholds = self._thresholds()
         router = config.router
         self.questions = QuestionBook(
-            config.questions, route_instructions=router.instructions if router else None
+            config.questions,
+            route_instructions=router.instructions if router else None,
+            custom=config.custom_blueprints,
         )
         self._cache: OrderedDict[str, ClassifierResponse] = OrderedDict()
         self._lock = threading.Lock()
+        self._unknown_modes: set[str] = set()
         self._report_setup()
 
     def _report_setup(self) -> None:
+        self._warn_custom_off()
         if self.installed:
             self._warn_clamped()
             self._warn_missing_sources()
@@ -75,6 +80,17 @@ class JevRuntime:
                 "blueprints={'input_guard': 'on', 'tool_gate': 'on'}."
             )
         self._report_questions()
+
+    def _warn_custom_off(self) -> None:
+        off = [
+            spec.name for spec in self.config.custom_blueprints if spec.name not in self.installed
+        ]
+        if off:
+            logger.warning(
+                "Custom Jev blueprints that are off, so Jev is never asked their questions: "
+                "%s. Turn them on in JevConfig.blueprints.",
+                ", ".join(off),
+            )
 
     def _warn_missing_sources(self) -> None:
         """Answer checks that would check nothing, or fail every citation, without a source."""
@@ -113,17 +129,20 @@ class JevRuntime:
             for side in ("input_guard", "output_guard")
             for name, value in policy.items()
         }
+        custom = {
+            name: value
+            for spec in self.config.custom_blueprints
+            for name, value in spec.threshold_defaults().items()
+        }
         # Later layers win: a model's re-tuned values beat the policy's starting points.
-        return merge_thresholds(guards, self.model.thresholds, self.config.thresholds)
+        return merge_thresholds(guards, self.model.thresholds, self.config.thresholds, extra=custom)
 
     def _warn_clamped(self) -> None:
         if not self.model.noul_floor:
             return
-        affected = [
-            name
-            for name in clamped_thresholds(self.thresholds, self.model.noul_floor)
-            if name.split(".", 1)[0] in self.installed
-        ]
+        custom = {name for spec in self.config.custom_blueprints for name in spec.noul_thresholds()}
+        clamped = clamped_thresholds(self.thresholds, self.model.noul_floor, extra_nouls=custom)
+        affected = [name for name in clamped if name.split(".", 1)[0] in self.installed]
         if affected:
             logger.warning(
                 "Jev model %r clamps Noul probabilities at %.3f, so these thresholds "
@@ -149,8 +168,27 @@ class JevRuntime:
     def snapshot(self, context: object) -> dict[str, Mode]:
         """Blueprint modes for a run starting now."""
         source = self.config.mode_source
-        hot = source.modes() if source is not None else {}
-        return resolve_modes(self.installed, hot, context_modes(context, self.config.context_key))
+        hot = self._known(source.modes()) if source is not None else {}
+        run = context_modes(context, self.config.context_key, known=self.names)
+        return resolve_modes(self.installed, hot, run)
+
+    def _known(self, modes: Mapping[str, Mode]) -> dict[str, Mode]:
+        """`modes` without the ids no blueprint here has; each one is logged once."""
+        known: dict[str, Mode] = {}
+        for key, mode in modes.items():
+            if key.split(".", 1)[0] in self.names:
+                known[key] = mode
+                continue
+            with self._lock:
+                first = key not in self._unknown_modes
+                self._unknown_modes.add(key)
+            if first:
+                logger.warning(
+                    "Ignoring Jev mode %r=%r from the mode source: no blueprint has that name.",
+                    key,
+                    mode,
+                )
+        return known
 
     def ask(
         self, blueprint: str, state: object, questions: Mapping[str, Question]
@@ -232,7 +270,7 @@ class JevRuntime:
             return
         by_owner: dict[str, list[str]] = {}
         for name in _differences(main, shadow):
-            by_owner.setdefault(_owner(name, blueprint), []).append(name)
+            by_owner.setdefault(_owner(name, blueprint, self.names), []).append(name)
         for owner, names in by_owner.items():
             self.emit(JevEvent(owner, "shadow", "model_disagreement", {"questions": names}))
 
@@ -275,10 +313,10 @@ def _cache_key(
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
-def _owner(question: str, asker: str) -> str:
+def _owner(question: str, asker: str, names: Collection[str]) -> str:
     """The blueprint a question belongs to: entry questions are keyed `blueprint::qid`."""
     head, sep, _ = question.partition("::")
-    return head if sep and head in BLUEPRINTS else asker
+    return head if sep and head in names else asker
 
 
 def _differences(main: ClassifierResponse, shadow: ClassifierResponse) -> list[str]:

@@ -257,15 +257,8 @@ class AnswerCheckMiddleware(JevMiddleware):
             return None
         for blueprint, summary in failed.items():
             self.jev.emit(JevEvent(blueprint, "on", "mark", {"summary": summary}))
-        update: dict[str, object] = {
-            "additional_kwargs": {**reply.additional_kwargs, JEV_CHECKS: failed}
-        }
-        if self.jev.config.verify.annotate:
-            note = "; ".join(failed.values())
-            update["content"] = (
-                f"{reply.text}\n\n(Note: an automatic check could not confirm this answer: {note}.)"
-            )
-        return {"messages": [reply.model_copy(update=update)]}
+        kwargs = {**reply.additional_kwargs, JEV_CHECKS: failed}
+        return {"messages": [reply.model_copy(update={"additional_kwargs": kwargs})]}
 
     def wrap_model_call(
         self, request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
@@ -290,6 +283,28 @@ class AnswerCheckMiddleware(JevMiddleware):
         return request.override(
             system_message=append_system_text(request.system_message, CITATION_INSTRUCTIONS)
         )
+
+
+class AnswerNoteMiddleware(JevMiddleware):
+    """Add one visible note naming every failed check, under `VerifySettings.annotate`.
+
+    It runs after every check of the final answer, built-in and custom, so each check
+    reads the answer as the model wrote it, and the note lists them all.
+    """
+
+    def after_agent(self, state: JevState, runtime: Runtime) -> dict[str, object] | None:  # noqa: ARG002 - the marks on the reply decide, not the modes
+        """Append the note when a check marked the reply."""
+        reply = final_answer(state["messages"])
+        if reply is None or state.get("jev_blocked") or JEV_MARK in reply.additional_kwargs:
+            return None
+        failed = reply.additional_kwargs.get(JEV_CHECKS)
+        if not isinstance(failed, Mapping) or not failed:
+            return None
+        note = "; ".join(str(reason) for reason in failed.values())
+        content = (
+            f"{reply.text}\n\n(Note: an automatic check could not confirm this answer: {note}.)"
+        )
+        return {"messages": [reply.model_copy(update={"content": content})]}
 
 
 def _block(passage: dict) -> str:

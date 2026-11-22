@@ -33,7 +33,7 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 
 | Id | Where it acts | Hook | Typesafe source |
 | --- | --- | --- | --- |
-| `input_guard` | Before the LLM sees the user's message | entry request, `before_agent` | [Guardrails](https://docs.typesafe.ai/cookbooks/llm_guardrails) |
+| `input_guard` | Before the LLM sees the user's message, judged with the turns before it | entry request, `before_agent` | [Guardrails](https://docs.typesafe.ai/cookbooks/llm_guardrails) |
 | `tool_result_guard` | Each tool result, as its tool returns and before the LLM reads it | `wrap_tool_call`; `before_model` ends a blocked run | [RAG passages](https://docs.typesafe.ai/cookbooks/classifying_rag_passages) (injection) |
 | `model_router` | Picks the model for each call | entry request, `wrap_model_call` | [LangChain integration](https://docs.langchain.com/oss/python/integrations/providers/typesafe) |
 | `coding_router` | Sends requests whose answer needs code to the coding model | entry request, `wrap_model_call` | open-source-jev coding question |
@@ -43,7 +43,7 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | `skill_load_check` | Checks `read_file` on a `SKILL.md` | `wrap_tool_call` | [Skill suggestion](https://docs.typesafe.ai/cookbooks/skill_suggestion) (fits check) |
 | `rag_passages` | Filters retrieval tool results | `wrap_tool_call` | [Classifying RAG passages](https://docs.typesafe.ai/cookbooks/classifying_rag_passages) |
 | `tool_gate` | Intent, leak, irreversibility, and injection checks before a tool runs | `wrap_tool_call` | `AutoModeMiddleware`, [agent trace safety checks](https://evals.typesafe.ai/agent_trace_observability) |
-| `output_guard` | Before the user sees the reply | `after_model` | [Guardrails](https://docs.typesafe.ai/cookbooks/llm_guardrails) |
+| `output_guard` | The text of each model reply, including text beside tool calls | `after_model` | [Guardrails](https://docs.typesafe.ai/cookbooks/llm_guardrails) |
 | `verify_answer` | Does the answer follow from the evidence? | `after_agent` | [Verifying answers](https://docs.typesafe.ai/cookbooks/verify_llm_outputs) |
 | `citation_check` | Are quotes in their sources, and do they support the claim? | `after_agent` | [Citation check](https://docs.typesafe.ai/cookbooks/citation_check) |
 | `answer_scoring` | Weighted quality scores | `after_agent` | [Composite scoring](https://docs.typesafe.ai/patterns/composite-scoring) |
@@ -155,6 +155,8 @@ Blueprints listed in `JevConfig.fail_closed` refuse when Jev cannot be reached; 
 - **Not yet run against a live Jev server.** The unit tests use scripted decision and chat models. Questions are copied from the docs, and thresholds come from the cookbooks, which were measured with `jev-1.14.0`. Re-run your own evaluation sets after changing models.
 - **Tool approval needs a checkpointer.** `tool_gate` pauses risky calls for approval in `HumanInTheLoopMiddleware`'s format. Without a checkpointer, the run stops at the request and the tool does not run. Set `ToolGateSettings(ask_human=False)` to refuse instead of pausing.
 - **Tool results are screened before they are stored.** `tool_result_guard` checks each result in `wrap_tool_call`, including results a tool returns inside a `Command`, such as a subagent's answer from `task`. A withheld result is replaced before it is written to the state, so its raw text never reaches a checkpoint or a trace. Tool results that did not come from the tool node, such as ones passed in with the conversation, are screened in `before_model`.
+- **The entry request carries recent turns.** `GuardSettings.input_history` (4 by default) sends the earlier user and assistant messages with each user message, so a harmful request spread over several turns is judged as a whole. Routing, the coding check, and chat mode see them too. Set it to 0 to send the latest message alone.
+- **The output guard screens every model turn that has text.** That includes text written beside tool calls: a blocked turn is replaced by the refusal as a whole, so its tool calls never run. Turns with tool calls and no text are not asked about.
 - **The output guard runs after generation.** With token streaming, the user may already have seen a reply before it is replaced.
 - **Harness profiles are a beta, process-global API.** `register_jev_profile` relies on deepagents' `HarnessProfile`, which is beta and applies to every agent in the process. It does not reach `CompiledSubAgent` or `AsyncSubAgent` runnables.
 - **Citations need a known format.** `citation_check` reads `[cite: <source id> | "<exact quote>"]`, and the model is asked for that format while the check is on. Set `VerifySettings(add_citation_instructions=False)` if your own prompt already asks for it.

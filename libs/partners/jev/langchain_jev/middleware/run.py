@@ -9,12 +9,13 @@ from langchain_core.decisions.types import Answer
 from langgraph.types import Overwrite
 from pydantic import TypeAdapter
 
-from langchain_jev._messages import clip, latest_request
+from langchain_jev._messages import clip, earlier_turns, latest_request
 from langchain_jev.middleware._base import Ask, AskMany, Flow, JevMiddleware
 from langchain_jev.switches import mode_for
 
 if TYPE_CHECKING:
     from langchain_core.decisions import BaseDecisionModel, ClassifierResponse, Question
+    from langchain_core.messages import AnyMessage
     from langgraph.runtime import Runtime
 
     from langchain_jev._runtime import JevRuntime
@@ -23,6 +24,8 @@ if TYPE_CHECKING:
 
 _ANSWER = TypeAdapter(Answer)
 _FAILED = "__failed__"
+_TURN_CHARS = 1_000
+"""Longest text kept from each earlier message in the entry request."""
 _Group = tuple[tuple[str, ...], dict[str, "Question"]]
 """The blueprints sharing one entry request, and its questions keyed `blueprint::qid`."""
 
@@ -83,7 +86,7 @@ class JevEntryMiddleware(JevMiddleware):
         request = latest_request(state["messages"])
         if not groups or not request:
             return None
-        message = self._state(request)
+        message = self._state(state["messages"], request)
         asks = tuple(Ask(message, questions, owners) for owners, questions in groups)
         if len(asks) == 1:
             responses = [cast("ClassifierResponse | None", (yield asks[0]))]
@@ -110,8 +113,14 @@ class JevEntryMiddleware(JevMiddleware):
             group[2].update({f"{blueprint}::{qid}": q for qid, q in asked.items()})
         return [(tuple(owners), questions) for _, owners, questions in groups]
 
-    def _state(self, request: str) -> dict[str, object]:
-        return {"message": clip(request, self.jev.max_chars())}
+    def _state(self, messages: Sequence[AnyMessage], request: str) -> dict[str, object]:
+        """The latest user message, and the turns before it when there are any."""
+        state: dict[str, object] = {"message": clip(request, self.jev.max_chars())}
+        limit = min(_TURN_CHARS, self.jev.max_chars())
+        earlier = earlier_turns(messages, self.jev.config.guard.input_history, limit)
+        if earlier:
+            state["earlier_messages"] = earlier
+        return state
 
 
 def _entry_record(

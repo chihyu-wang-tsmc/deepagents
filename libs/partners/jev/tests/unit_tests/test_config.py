@@ -85,6 +85,11 @@ def test_removed_hazards_are_named_in_the_error() -> None:
         JevRuntime(JevConfig(model=ScriptedJev(), questions={"memory_write.remember": "Reworded."}))
 
 
+def test_input_history_cannot_be_negative() -> None:
+    with pytest.raises(ValueError, match="input_history"):
+        JevConfig(guard=GuardSettings(input_history=-1)).installed()
+
+
 def test_answer_checks_without_a_source_warn(caplog: pytest.LogCaptureFixture) -> None:
     config = JevConfig(
         model=ScriptedJev(), blueprints={"verify_answer": "on", "citation_check": "on"}

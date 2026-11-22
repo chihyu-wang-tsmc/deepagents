@@ -79,8 +79,8 @@ def show(event: JevEvent) -> None:
 #    "on" 照 Jev 的判斷動作；"shadow" 只記錄 Jev 的判斷，不改變結果
 #    打開的藍圖會問它全部的場景；tool_gate.within_grant 另外需要 ToolGateSettings(policy=...)
 blueprints = {
-    "input_guard": "on",  # 使用者訊息：越獄、要求停用安全規則、有害請求
-    "output_guard": "on",  # 最後的回覆：違反政策、提供有害協助
+    "input_guard": "on",  # 使用者訊息（連同前幾輪對話）：越獄、要求停用安全規則、有害請求
+    "output_guard": "on",  # 每一輪回覆的文字：違反政策、提供有害協助
     "tool_result_guard": "on",  # 工具結果裡夾帶的指令（prompt injection）
     "tool_gate": "on",  # 工具執行前：風險、使用者是否同意、資料外洩、能不能復原
     "answer_scoring": "on",  # 回答的品質分數

@@ -4,10 +4,11 @@ Order matters for three kinds of hook:
 
 - `before_agent` runs in list order: the run snapshot first, then the entry request,
     then the blueprints that act on its answers.
-- `wrap_tool_call` nests in list order: the tool gate wraps the skill-load check,
-    which wraps passage classification, so a refused call never reaches retrieval.
-- `after_agent` runs in reverse: answer checks run first and may loop back to the
-    model; review only runs once the answer is final.
+- `wrap_tool_call` nests in list order: the tool gate wraps the tool-result guard,
+    which wraps the skill-load check and passage classification, so a refused call
+    never runs, and the guard screens what the inner layers return.
+- `after_agent` runs in reverse: answer checks run first and mark the reply; review
+    runs after them, on the marked reply.
 """
 
 from __future__ import annotations
@@ -73,9 +74,9 @@ _ENTRY: tuple[tuple[str, Callable[[JevRuntime], JevMiddleware]], ...] = (
 )
 _REST: tuple[tuple[str, Callable[[JevRuntime], JevMiddleware]], ...] = (
     (SKILL_SUGGESTION, SkillSuggestionMiddleware),
-    (TOOL_RESULT_GUARD, ToolResultGuardMiddleware),
     (OUTPUT_GUARD, OutputGuardMiddleware),
     (TOOL_GATE, ToolGateMiddleware),
+    (TOOL_RESULT_GUARD, ToolResultGuardMiddleware),
     (SKILL_LOAD_CHECK, SkillLoadCheckMiddleware),
     (RAG_PASSAGES, RagPassagesMiddleware),
     (RUN_REVIEW, RunReviewMiddleware),

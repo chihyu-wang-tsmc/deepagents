@@ -7,11 +7,13 @@ into pass, review, or block with thresholds kept in code.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 from langchain.agents.middleware.types import hook_config
 from langchain_core.decisions.types import Answer, NoulAnswer, ScoreAnswer
 from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.types import Command
 
 from langchain_jev._messages import (
     append_system_text,
@@ -21,7 +23,7 @@ from langchain_jev._messages import (
     new_tool_messages,
 )
 from langchain_jev._types import INPUT_GUARD, OUTPUT_GUARD, TOOL_RESULT_GUARD
-from langchain_jev.middleware._base import Ask, AskMany, Flow, JevMiddleware
+from langchain_jev.middleware._base import Ask, AskMany, Flow, Handle, JevMiddleware
 from langchain_jev.middleware.run import entry_answers
 from langchain_jev.questions import (
     HAZARD_ACTION,
@@ -35,7 +37,7 @@ from langchain_jev.switches import mode_for
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
-    from langchain.agents.middleware.types import ModelRequest, ModelResponse
+    from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolCallRequest
     from langchain_core.decisions import ClassifierResponse, Noul, Question
     from langgraph.runtime import Runtime
 
@@ -44,6 +46,9 @@ if TYPE_CHECKING:
 
 JEV_MARK = "jev"
 """`additional_kwargs` key marking messages a Jev blueprint wrote or already screened."""
+
+JEV_BLOCK = "jev_block"
+"""`additional_kwargs` key on a tool result withheld under `tool_result_action="block"`."""
 
 
 def route(nouls: Mapping[str, float], severity: float, thresholds: Mapping[str, float]) -> str:
@@ -158,74 +163,165 @@ class InputGuardMiddleware(_Guard):
 
 
 class ToolResultGuardMiddleware(JevMiddleware):
-    """Screen tool results for instructions aimed at the agent before it reads them."""
+    """Screen tool results for instructions aimed at the agent before it reads them.
+
+    Each result is screened in `wrap_tool_call`, as soon as its tool returns and before
+    it is written to the state, so the raw text of a withheld result never reaches the
+    state, a checkpoint, or a trace. Results a tool returns inside a `Command`, such as
+    a subagent's answer from the `task` tool, are screened too. `before_model` ends the
+    run when a result was withheld under `block`, and screens new tool results that did
+    not come from the tool node, such as ones passed in with the conversation.
+    """
 
     blueprint = TOOL_RESULT_GUARD
 
+    def wrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], ToolMessage | Command],
+    ) -> ToolMessage | Command:
+        """Screen one tool call's result synchronously."""
+        return self.drive(self._screen_call(request), cast("Callable[[object], object]", handler))
+
+    async def awrap_tool_call(
+        self,
+        request: ToolCallRequest,
+        handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
+    ) -> ToolMessage | Command:
+        """Screen one tool call's result asynchronously."""
+        return await self.adrive(
+            self._screen_call(request), cast("Callable[[object], Awaitable[object]]", handler)
+        )
+
     @hook_config(can_jump_to=["end"])
     def before_model(self, state: JevState, runtime: Runtime) -> dict[str, object] | None:
-        """Screen synchronously."""
+        """End a blocked run, and screen results that skipped the tool node."""
         return self.drive(self._flow(state, runtime))
 
     @hook_config(can_jump_to=["end"])
     async def abefore_model(self, state: JevState, runtime: Runtime) -> dict[str, object] | None:
-        """Screen asynchronously."""
+        """End a blocked run, and screen results that skipped the tool node, asynchronously."""
         return await self.adrive(self._flow(state, runtime))
 
-    def _flow(self, state: JevState, runtime: Runtime) -> Flow[dict[str, object] | None]:
-        mode = self.mode(state, runtime)
-        fresh = [
-            m
-            for m in new_tool_messages(state["messages"])
-            if JEV_MARK not in m.additional_kwargs and m.text.strip()
-        ]
-        fresh = [m for m in fresh if self.mode(state, runtime, m.name or "") != "off"]
-        if mode == "off" or not fresh:
-            return None
-        request = clip(latest_request(state["messages"]), 2_000)
-        questions = {name: self.question(name) for name in TOOL_RESULT_QUESTIONS}
-        asks = tuple(Ask(self._state(request, m), questions) for m in fresh)
+    def _screen_call(self, request: ToolCallRequest) -> Flow[ToolMessage | Command]:
+        result = cast("ToolMessage | Command", (yield Handle(request)))
+        name = request.tool_call["name"]
+        mode = self.mode(request.state, request.runtime, name)
+        messages = [m for m in _tool_messages(result) if _unscreened(m)]
+        if mode == "off" or not messages:
+            return result
+        text = clip(latest_request(request.state.get("messages", [])), 2_000)
+        questions = {q: self.question(q) for q in TOOL_RESULT_QUESTIONS}
+        asks = tuple(Ask(self._state(text, m, name), questions) for m in messages)
         responses = cast("list[ClassifierResponse | None]", (yield AskMany(asks)))
-        flagged = self._flagged(mode, fresh, responses)
+        verdicts = self._verdicts(mode, messages, responses, name)
+        action = self.jev.config.guard.tool_result_action if mode == "on" else None
+        screened = {id(m): _screened(m, p, action) for m, p in zip(messages, verdicts, strict=True)}
+        return _replace(result, screened)
+
+    def _flow(self, state: JevState, runtime: Runtime) -> Flow[dict[str, object] | None]:
+        fresh = new_tool_messages(state["messages"])
+        if any(m.additional_kwargs.get(JEV_BLOCK) for m in fresh):
+            return self._block()
+        mode = self.mode(state, runtime)
+        unscreened = [
+            m for m in fresh if _unscreened(m) and self.mode(state, runtime, m.name or "") != "off"
+        ]
+        if mode == "off" or not unscreened:
+            return None
+        text = clip(latest_request(state["messages"]), 2_000)
+        questions = {q: self.question(q) for q in TOOL_RESULT_QUESTIONS}
+        asks = tuple(Ask(self._state(text, m, m.name), questions) for m in unscreened)
+        responses = cast("list[ClassifierResponse | None]", (yield AskMany(asks)))
+        verdicts = self._verdicts(mode, unscreened, responses, None)
+        flagged = [(m, p) for m, p in zip(unscreened, verdicts, strict=True) if p is not None]
         if mode != "on" or not flagged:
             return None
         return self._act(flagged)
 
-    def _state(self, request: str, message: ToolMessage) -> dict[str, object]:
+    def _state(self, request: str, message: ToolMessage, tool: str | None) -> dict[str, object]:
         return {
             "user_request": request,
-            "tool_name": message.name or "tool",
+            "tool_name": tool or message.name or "tool",
             "tool_output": clip(message.text, self.jev.max_chars()),
         }
 
-    def _flagged(
+    def _verdicts(
         self,
         mode: Mode,
         messages: list[ToolMessage],
         responses: list[ClassifierResponse | None],
-    ) -> list[tuple[ToolMessage, float]]:
-        flagged: list[tuple[ToolMessage, float]] = []
+        tool: str | None,
+    ) -> list[float | None]:
+        """Each result's injection probability when it is flagged, else `None`."""
+        verdicts: list[float | None] = []
         limit = self.threshold("tool_result_guard.injection")
         for message, response in zip(messages, responses, strict=True):
             if response is None:
+                verdicts.append(None)
                 continue
             probability = response.nouls["contains_prompt_injection"].noul
             action = "flag" if probability >= limit else "pass"
-            self.record(mode, action, tool=message.name, contains_prompt_injection=probability)
-            if action == "flag":
-                flagged.append((message, probability))
-        return flagged
+            self.record(
+                mode, action, tool=tool or message.name, contains_prompt_injection=probability
+            )
+            verdicts.append(probability if action == "flag" else None)
+        return verdicts
 
     def _act(self, flagged: list[tuple[ToolMessage, float]]) -> dict[str, object]:
         action = self.jev.config.guard.tool_result_action
         if action == "block":
-            refusal = self.jev.config.guard.refusal_message
-            return {
-                "messages": [_jev_ai(refusal, self.blueprint)],
-                "jump_to": "end",
-                "jev_blocked": True,
-            }
+            return self._block()
         return {"messages": [_rewrite(message, p, action) for message, p in flagged]}
+
+    def _block(self) -> dict[str, object]:
+        refusal = self.jev.config.guard.refusal_message
+        return {
+            "messages": [_jev_ai(refusal, self.blueprint)],
+            "jump_to": "end",
+            "jev_blocked": True,
+        }
+
+
+def _tool_messages(result: ToolMessage | Command) -> list[ToolMessage]:
+    """The tool results in what a tool returned: itself, or the ones inside a `Command`."""
+    if isinstance(result, ToolMessage):
+        return [result]
+    update = result.update if isinstance(result, Command) else None
+    messages = update.get("messages") if isinstance(update, dict) else None
+    if not isinstance(messages, (list, tuple)):
+        return []
+    return [m for m in messages if isinstance(m, ToolMessage)]
+
+
+def _unscreened(message: ToolMessage) -> bool:
+    return JEV_MARK not in message.additional_kwargs and bool(message.text.strip())
+
+
+def _screened(message: ToolMessage, probability: float | None, action: str | None) -> ToolMessage:
+    """The result to keep: marked as screened, and rewritten when flagged in `on` mode."""
+    if probability is None or action is None:
+        return message.model_copy(
+            update={"additional_kwargs": {**message.additional_kwargs, JEV_MARK: TOOL_RESULT_GUARD}}
+        )
+    if action != "block":
+        return _rewrite(message, probability, action)
+    withheld = _rewrite(message, probability, "redact")
+    return withheld.model_copy(
+        update={"additional_kwargs": {**withheld.additional_kwargs, JEV_BLOCK: True}}
+    )
+
+
+def _replace(
+    result: ToolMessage | Command, screened: dict[int, ToolMessage]
+) -> ToolMessage | Command:
+    """`result` with each screened tool result swapped in."""
+    if isinstance(result, ToolMessage):
+        return screened.get(id(result), result)
+    update = dict(cast("dict[str, object]", result.update))
+    messages = cast("list[object]", update["messages"])
+    update["messages"] = [screened.get(id(m), m) for m in messages]
+    return replace(result, update=update)
 
 
 def _rewrite(message: ToolMessage, probability: float, action: str) -> ToolMessage:

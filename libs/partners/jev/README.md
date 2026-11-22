@@ -34,7 +34,7 @@ agent = create_deep_agent(model=chat_model, tools=tools)
 | Id | Where it acts | Hook | Typesafe source |
 | --- | --- | --- | --- |
 | `input_guard` | Before the LLM sees the user's message | entry request, `before_agent` | [Guardrails](https://docs.typesafe.ai/cookbooks/llm_guardrails) |
-| `tool_result_guard` | Tool results, before the LLM reads them | `before_model` | [RAG passages](https://docs.typesafe.ai/cookbooks/classifying_rag_passages) (injection) |
+| `tool_result_guard` | Each tool result, as its tool returns and before the LLM reads it | `wrap_tool_call`; `before_model` ends a blocked run | [RAG passages](https://docs.typesafe.ai/cookbooks/classifying_rag_passages) (injection) |
 | `model_router` | Picks the model for each call | entry request, `wrap_model_call` | [LangChain integration](https://docs.langchain.com/oss/python/integrations/providers/typesafe) |
 | `coding_router` | Sends requests whose answer needs code to the coding model | entry request, `wrap_model_call` | open-source-jev coding question |
 | `chat_mode` | Drops tools when one reply answers the request | entry request, `wrap_model_call` | open-source-jev mode question |
@@ -154,6 +154,7 @@ Blueprints listed in `JevConfig.fail_closed` refuse when Jev cannot be reached; 
 - **Removed hazards.** The guards no longer ask about `medical_advice` or `self_harm`, and the support message that answered `self_harm` went with them. The input guard asks about `jailbreak`, `drop_safeguards`, and `harmful_request`, and the output guard about `broke_policy` and `harmful_request`. Naming a removed hazard in `GuardSettings` or in `questions` raises a `ValueError` that says it was removed.
 - **Not yet run against a live Jev server.** The unit tests use scripted decision and chat models. Questions are copied from the docs, and thresholds come from the cookbooks, which were measured with `jev-1.14.0`. Re-run your own evaluation sets after changing models.
 - **Tool approval needs a checkpointer.** `tool_gate` pauses risky calls for approval in `HumanInTheLoopMiddleware`'s format. Without a checkpointer, the run stops at the request and the tool does not run. Set `ToolGateSettings(ask_human=False)` to refuse instead of pausing.
+- **Tool results are screened before they are stored.** `tool_result_guard` checks each result in `wrap_tool_call`, including results a tool returns inside a `Command`, such as a subagent's answer from `task`. A withheld result is replaced before it is written to the state, so its raw text never reaches a checkpoint or a trace. Tool results that did not come from the tool node, such as ones passed in with the conversation, are screened in `before_model`.
 - **The output guard runs after generation.** With token streaming, the user may already have seen a reply before it is replaced.
 - **Harness profiles are a beta, process-global API.** `register_jev_profile` relies on deepagents' `HarnessProfile`, which is beta and applies to every agent in the process. It does not reach `CompiledSubAgent` or `AsyncSubAgent` runnables.
 - **Citations need a known format.** `citation_check` reads `[cite: <source id> | "<exact quote>"]`, and the model is asked for that format while the check is on. Set `VerifySettings(add_citation_instructions=False)` if your own prompt already asks for it.

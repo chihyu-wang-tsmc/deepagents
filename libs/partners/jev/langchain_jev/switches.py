@@ -7,9 +7,10 @@
 3. Per run: `agent.invoke(..., context={"jev_modes": {...}})` overrides both for one
     run, for one user, thread, or experiment arm.
 
-The more specific level wins. Keys are blueprint ids (`tool_gate`) or a blueprint id
-and one of its parts (`input_guard.jailbreak`, `tool_gate.execute`). A part can
-narrow its blueprint (`on` to `shadow` or `off`) but never widen it.
+The more specific level wins. Keys are blueprint ids (`tool_gate`, or a custom
+blueprint's name) or a blueprint id and one of its parts (`input_guard.jailbreak`,
+`tool_gate.execute`). A part can narrow its blueprint (`on` to `shadow` or `off`) but
+never widen it.
 
 The modes are read once when a run starts and kept for the whole run, including
 after a human-in-the-loop interrupt resumes, so a decision never flips mid-run.
@@ -24,9 +25,12 @@ import threading
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
-from langchain_jev._types import BLUEPRINTS, MODES, Mode
+from langchain_jev._types import MODES, Mode
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 logger = logging.getLogger(__name__)
 
@@ -131,26 +135,37 @@ class FileModeSource:
         self._mtime, self._modes = mtime, parse_modes(raw, source=str(self.path))
 
 
-def parse_modes(raw: Mapping[str, object], *, source: str) -> dict[str, Mode]:
-    """Keep the entries with a known blueprint and a valid mode; log the rest."""
+def parse_modes(
+    raw: Mapping[str, object], *, source: str, known: Collection[str] | None = None
+) -> dict[str, Mode]:
+    """Keep the entries with a valid mode; log the rest.
+
+    Args:
+        raw: Overrides keyed by blueprint id or `id.part`.
+        source: Where they came from, for the log.
+        known: Blueprint ids to keep. `None` keeps any id: a mode source does not know
+            which custom blueprints an agent has, so the agent's runtime drops the rest.
+    """
     parsed: dict[str, Mode] = {}
     for key, value in raw.items():
-        blueprint = key.split(".", 1)[0]
-        if blueprint not in BLUEPRINTS or value not in MODES:
+        blueprint = str(key).split(".", 1)[0]
+        if not blueprint or value not in MODES or (known is not None and blueprint not in known):
             logger.warning("Ignoring Jev mode %r=%r from %s.", key, value, source)
             continue
-        parsed[key] = cast("Mode", value)
+        parsed[str(key)] = cast("Mode", value)
     return parsed
 
 
-def context_modes(context: object, key: str) -> dict[str, Mode]:
+def context_modes(
+    context: object, key: str, *, known: Collection[str] | None = None
+) -> dict[str, Mode]:
     """Read per-run overrides from the runtime context, a mapping or an object."""
     if context is None:
         return {}
     raw = context.get(key) if isinstance(context, Mapping) else getattr(context, key, None)
     if not isinstance(raw, Mapping):
         return {}
-    return parse_modes(raw, source="runtime context")
+    return parse_modes(raw, source="runtime context", known=known)
 
 
 def resolve_modes(installed: Mapping[str, Mode], *layers: Mapping[str, Mode]) -> dict[str, Mode]:

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from langchain_jev._types import removed_note
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
 GUARD_POLICIES: dict[str, dict[str, float]] = {
     "strict": {"review": 0.35, "action": 0.70, "severity_block": 2.0},
@@ -91,15 +91,21 @@ NOUL_THRESHOLDS: frozenset[str] = frozenset(
 """Thresholds compared with Noul probabilities, which a clamping server distorts."""
 
 
-def merge_thresholds(*layers: Mapping[str, float]) -> dict[str, float]:
-    """Merge threshold layers, later layers winning.
+def merge_thresholds(
+    *layers: Mapping[str, float], extra: Mapping[str, float] | None = None
+) -> dict[str, float]:
+    """Merge threshold layers onto the defaults, later layers winning.
+
+    Args:
+        *layers: Values to apply, in order.
+        extra: Defaults of custom blueprints, added to the package's own.
 
     Raises:
         ValueError: If a layer names a threshold that does not exist.
     """
-    merged = dict(DEFAULT_THRESHOLDS)
+    merged = {**DEFAULT_THRESHOLDS, **(extra or {})}
     for layer in layers:
-        unknown = sorted(set(layer) - set(DEFAULT_THRESHOLDS))
+        unknown = sorted(set(layer) - set(merged))
         if unknown:
             msg = f"Unknown Jev thresholds: {', '.join(unknown)}{removed_note(unknown)}"
             raise ValueError(msg)
@@ -107,7 +113,9 @@ def merge_thresholds(*layers: Mapping[str, float]) -> dict[str, float]:
     return merged
 
 
-def clamped_thresholds(thresholds: Mapping[str, float], noul_floor: float) -> list[str]:
+def clamped_thresholds(
+    thresholds: Mapping[str, float], noul_floor: float, *, extra_nouls: Collection[str] = ()
+) -> list[str]:
     """Names of Noul thresholds a server clamping at `noul_floor` turns into 0.5.
 
     A server that pushes every Noul probability below `noul_floor` (and above
@@ -117,6 +125,6 @@ def clamped_thresholds(thresholds: Mapping[str, float], noul_floor: float) -> li
     low, high = 1 - noul_floor, noul_floor
     return sorted(
         name
-        for name in NOUL_THRESHOLDS
+        for name in NOUL_THRESHOLDS | set(extra_nouls)
         if low < thresholds[name] < high and thresholds[name] != 0.5  # noqa: PLR2004
     )

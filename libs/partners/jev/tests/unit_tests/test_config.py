@@ -202,12 +202,24 @@ def test_a_part_can_narrow_but_not_widen_its_blueprint() -> None:
     assert mode_for(snapshot, "input_guard", "jailbreak") == "shadow"
 
 
-def test_env_source_ignores_bad_entries(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(
-        "JEV_MODES", "tool_gate=off, rag_passages=shadow, nonsense=off, input_guard=maybe"
+def test_bad_modes_are_dropped_and_unknown_names_warn_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setenv("JEV_MODES", "tool_gate=off, nonsense=off, input_guard=maybe")
+    config = JevConfig(
+        model=ScriptedJev(),
+        blueprints={"tool_gate": "on", "input_guard": "on"},
+        mode_source=EnvModeSource(),
     )
+    runtime = JevRuntime(config)
 
-    assert EnvModeSource().modes() == {"tool_gate": "off", "rag_passages": "shadow"}
+    with caplog.at_level(logging.WARNING, logger="langchain_jev"):
+        first = runtime.snapshot(None)
+        second = runtime.snapshot(None)
+
+    assert first == second == {"tool_gate": "off", "input_guard": "on"}
+    unknown = [r.getMessage() for r in caplog.records if "nonsense" in r.getMessage()]
+    assert len(unknown) == 1
 
 
 def test_file_source_reloads_and_keeps_the_last_good_modes(tmp_path: Path) -> None:

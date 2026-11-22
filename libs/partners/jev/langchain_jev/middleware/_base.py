@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Generator, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.runnables.config import ContextThreadPoolExecutor
@@ -67,7 +67,8 @@ Flow = Generator[Step, object, ResultT]
 class JevMiddleware(AgentMiddleware[JevState]):
     """Shared plumbing: modes, thresholds, events, and the step drivers."""
 
-    blueprint: ClassVar[str] = ""
+    blueprint: str = ""
+    """The blueprint id; a class attribute for built-ins, set per instance for custom ones."""
     state_schema = JevState
 
     def __init__(self, jev: JevRuntime) -> None:

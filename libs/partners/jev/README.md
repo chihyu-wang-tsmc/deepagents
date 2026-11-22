@@ -70,6 +70,54 @@ config = JevConfig(
 
 When Jev says a good answer needs code (P ≥ 0.5, the cut open-source-jev uses), the coding model takes the call instead of the routed one.
 
+## Custom blueprints
+
+A `JevBlueprint` adds a blueprint of your own. It holds its questions, the stage where they are asked, and what to do with the answers, so the questions and the action always match. The stack asks the questions at that stage and hands the answers back under the ids you gave them.
+
+```python
+from langchain_jev import JevBlueprint, JevConfig, Refuse, noul, register_jev_profile
+
+confidential = JevBlueprint(
+    name="confidential_request",
+    stage="entry",
+    questions={
+        "asks_confidential": noul(
+            "Does this message ask for confidential company data?",
+            yes="It asks for customer lists, internal prices, or similar.",
+            no="It asks for nothing confidential.",
+        )
+    },
+    when={"asks_confidential": 0.7},  # a yes/no answer at or above its threshold triggers `act`
+    act=Refuse("I can't share confidential company data."),
+)
+register_jev_profile(
+    ["openai"],
+    JevConfig(
+        blueprints={"input_guard": "on", "confidential_request": "on"},
+        custom_blueprints=[confidential],
+    ),
+)
+```
+
+| Stage | Hook | What Jev reads | Built-ins at the same stage | Actions |
+| --- | --- | --- | --- | --- |
+| `entry` | `before_agent`, inside the entry request | the user's message and earlier turns | `input_guard`, the routers, `chat_mode` | `Refuse`, `SystemNote`, `UseModel`, `NoTools` |
+| `model_output` | `after_model` | the text of each model reply | `output_guard` | `Refuse` |
+| `tool_call` | `wrap_tool_call`, before the tool runs | the call and the recent messages | `tool_gate` | `Refuse`, `AskHuman` |
+| `tool_result` | `wrap_tool_call`, after the tool returns | the tool's result | `tool_result_guard` | `Warn`, `Redact`, `Refuse` |
+| `final_answer` | `after_agent` | the request and the final answer | the answer checks | `Mark` |
+
+- **One entry request.** Entry questions join the request the built-in entry blueprints already send, so they add no request.
+- **The built-in switches.** A custom blueprint is off until `blueprints` turns it on by name. `JEV_MODES` and the run's `context` switch it, and at the tool stages a part narrows it to one tool, such as `external_email.send_email`. Reword `<name>.<question id>` in `questions`, tune `<name>.<question id>` (with `when`) or `<name>.<threshold>` (with `decide`) in `thresholds`, give it a model in `models`, and list it in `fail_closed`. Its events carry its name and each answer.
+- **`decide` for everything else.** Instead of `when` and `act`, `decide(answers, thresholds)` reads Choice and Score answers or combines questions, and returns an action or `None`. Name the values it compares in `thresholds={...}` so they can be tuned without code changes. It may be called more than once a run, so keep it free of side effects.
+- **Built-ins act first.** At each stage a custom blueprint acts after the built-in ones. A refusal from `input_guard`, `output_guard`, or `tool_gate` comes first, and a result `tool_result_guard` withheld is not asked about again. Custom blueprints of one stage act in the order they are listed. A model picked by `UseModel` wins over the routers.
+- **When Jev cannot answer.** A custom blueprint in `fail_closed` refuses at `entry` and `model_output`, does not run the call at `tool_call`, withholds the result at `tool_result`, and marks the answer unchecked at `final_answer`. Otherwise the agent continues.
+- **Marks.** `Mark` adds the blueprint's name and reason to `additional_kwargs["jev_checks"]`, beside the built-in checks. With `VerifySettings(annotate=True)`, one note at the end of the reply names every failed check, and each check reads the answer as the model wrote it.
+- **Checked when defined.** A bad name, an unknown stage, a `when` naming a Choice or Score, an action that does not fit the stage, or a tool stage without `tools` raises when the `JevBlueprint` is built. A name the package already uses raises when the config is built.
+- **Limits.** Entry questions are asked about the user's message, because the entry request shares one state; ask about other text at another stage. The state each stage sends Jev is fixed. `tool_call` and `tool_result` check only the tools in `tools`. `default_questions(custom=[...])` lists custom questions with the built-in ones.
+
+[`examples/quickstart_customer_jev.py`](examples/quickstart_customer_jev.py) uses every stage.
+
 ## Swapping the Jev model
 
 ```python

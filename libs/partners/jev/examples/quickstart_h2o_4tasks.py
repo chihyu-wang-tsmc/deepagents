@@ -23,6 +23,10 @@
         LLM_FAST_MODEL、LLM_POWERFUL_MODEL、LLM_CODING_MODEL 可以各自指定，不設就用 LLM_MODEL。
         沒設 LLM_BASE_URL 時用不花錢的替身模型，回覆會寫出「哪個模型回答、拿到幾個工具」，
         直接看出路由和模式的效果：chat 模式拿到 0 個工具。
+    JEV_TRACE=1    調整 Jev 題目時用：每次問 Jev 都印出 Jev 讀到的內容、每題的鍵和回答、
+                   比較的門檻（題目鍵就是 JevConfig.questions 用來改措辭的鍵）
+    JEV_TRACE=full 再加上每題的原文和 Jev 讀到的完整內容
+    JEV_TRACE_FILE=jev_trace.jsonl  每次請求和每個決定各存成一行 JSON，方便整理成表
 
 h2o 會把 Noul 機率夾到 0.199／0.801，所以守門的門檻 0.35／0.70 實際上都等於 0.5，
 啟動時會印出這個警告。
@@ -46,6 +50,7 @@ from langchain_jev import (
     GuardSettings,
     JevConfig,
     JevEvent,
+    JevTrace,
     RouteChoice,
     RouterSettings,
     jev_middleware,
@@ -249,6 +254,8 @@ config = JevConfig(
     coding=CodingSettings(model=llm("coding")),
     guard=GuardSettings(refusal_message="抱歉，這個要求我沒辦法協助。"),
     on_event=events.append,
+    # JEV_TRACE：印出每次問 Jev 的內容和回答；決定已經由 check 印出，所以 decisions=False
+    trace=JevTrace.from_env(decisions=False),
 )
 agent = create_deep_agent(model=llm("default"), middleware=jev_middleware(config))
 

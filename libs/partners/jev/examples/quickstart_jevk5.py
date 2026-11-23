@@ -11,6 +11,10 @@ JevK5 服務要先跑起來（jevk5-serve，預設開在 http://localhost:8090�
     JEV_MODES      不改程式就切換藍圖，例如 "input_guard=off,answer_scoring=shadow"
                    （只能關掉或改成 shadow 下面打開的藍圖，不能打開沒列出來的）
     JEV_LIST_QUESTIONS=1  印出每個可以改寫的 Jev 問題（鍵與預設內容）後結束
+    JEV_TRACE=1    調整 Jev 題目時用：每次問 Jev 都印出 Jev 讀到的內容、每題的鍵和回答、
+                   比較的門檻（題目鍵就是 JevConfig.questions 用來改措辭的鍵）
+    JEV_TRACE=full 再加上每題的原文和 Jev 讀到的完整內容
+    JEV_TRACE_FILE=jev_trace.jsonl  每次請求和每個決定各存成一行 JSON，方便整理成表
 
 和 quickstart.py（h2o-lightning）的差別：JevK5 不是內建模型，要先註冊一次（第 2 步），
 再用名稱選它（第 6 步）。
@@ -28,6 +32,7 @@ from langchain_jev import (
     JevConfig,
     JevEvent,
     JevModel,
+    JevTrace,
     SystemOneClassifier,
     ToolGateSettings,
     default_questions,
@@ -125,6 +130,8 @@ config = JevConfig(
     guard=GuardSettings(refusal_message="抱歉，這個要求我沒辦法協助。"),
     tool_gate=ToolGateSettings(ask_human=False),  # 先用「直接擋」，不需要人工核准
     on_event=show,
+    # JEV_TRACE：印出每次問 Jev 的內容和回答；決定已經由 show 印出，所以 decisions=False
+    trace=JevTrace.from_env(decisions=False),
 )
 
 # 7. 掛到所有用 OpenAI 相容模型的 deep agent 上（主 agent + 子 agent）

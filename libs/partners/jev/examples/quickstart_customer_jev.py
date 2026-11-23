@@ -42,6 +42,10 @@
     JEV_MODES      不改程式就切換藍圖，自訂藍圖也可以，例如 "confidential_request=shadow"
                    工具位置可以只關一個工具，例如 "external_email.send_email=off"
     JEV_LIST_QUESTIONS=1  印出每個可以改寫的 Jev 問題（包含自訂藍圖的）後結束
+    JEV_TRACE=1    調整 Jev 題目時用：每次問 Jev 都印出 Jev 讀到的內容、每題的鍵和回答、
+                   比較的門檻（題目鍵就是 JevConfig.questions 用來改措辭的鍵）
+    JEV_TRACE=full 再加上每題的原文和 Jev 讀到的完整內容
+    JEV_TRACE_FILE=jev_trace.jsonl  每次請求和每個決定各存成一行 JSON，方便整理成表
 """
 
 import os
@@ -62,6 +66,7 @@ from langchain_jev import (
     JevBlueprint,
     JevConfig,
     JevEvent,
+    JevTrace,
     Mark,
     Notify,
     Refuse,
@@ -321,6 +326,8 @@ config = JevConfig(
     guard=GuardSettings(refusal_message="抱歉，這個要求我沒辦法協助。"),
     tool_gate=ToolGateSettings(tools=["send_email"], ask_human=False),
     on_event=show,
+    # JEV_TRACE：印出每次問 Jev 的內容和回答；決定已經由 show 印出，所以 decisions=False
+    trace=JevTrace.from_env(decisions=False),
 )
 
 # 7. 掛到所有用 OpenAI 相容模型的 deep agent 上（主 agent + 子 agent 都會套用自訂藍圖）

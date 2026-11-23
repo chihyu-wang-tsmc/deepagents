@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from langchain_jev.question_book import QuestionOverride
     from langchain_jev.review import RunReview
     from langchain_jev.switches import ModeSource
+    from langchain_jev.trace import JevTrace
 
     ModelSpec = str | JevModel | BaseDecisionModel
 
@@ -282,6 +283,9 @@ class JevConfig:
     review: ReviewSettings = field(default_factory=ReviewSettings)
     custom_blueprints: Sequence[JevBlueprint] = ()
     """Blueprints of your own. Each is off until `blueprints` turns it on by its name."""
+
+    trace: JevTrace | None = None
+    """Print or record each Jev request and decision, to tune the questions."""
 
     def blueprint_names(self) -> tuple[str, ...]:
         """Every blueprint this configuration can name: the built-ins, then yours."""

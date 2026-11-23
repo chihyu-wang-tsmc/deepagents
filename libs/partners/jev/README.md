@@ -191,6 +191,30 @@ config = JevConfig(
 - **Outside the agent.** `RunContext(questions=...)` and `compare_answers(..., questions=...)` take the same keys.
 - **Re-check thresholds.** They were tuned on the default wording, so re-run your evaluation sets after rewording a question.
 
+## Seeing what Jev was asked
+
+To tune a question, look at what Jev read, how it answered, and which threshold the answer was compared with. `JevConfig(trace=JevTrace())` prints a block for every request the stack sends to Jev, and a line for every decision:
+
+```text
+[jev request] entry: input_guard, chat_mode · h2o-lightning-4b
+  read: message = "Delete /tmp/a.txt"
+  input_guard.jailbreak                yes 0.12
+  input_guard.drop_safeguards          yes 0.00
+  input_guard.harmful_request          yes 0.00
+  input_guard.severity                 score 0 of 3
+  chat_mode.mode                       agent 0.90 | chat 0.10
+  thresholds: input_guard.review 0.35, input_guard.action 0.7, input_guard.severity_block 2, chat_mode.min_probability 0.8
+[jev decision] input_guard on pass
+[jev decision] chat_mode on agent
+```
+
+- **What the lines are.** `read` is the state the blueprint sent Jev, clipped. Each question line starts with the key `JevConfig.questions` rewords it by, then gives the answer: the probability of yes for a Noul, each option's probability for a Choice, and the level for a Score. `thresholds` lists the values the blueprints compare those answers with, after the guard policy, the model's own thresholds, and `JevConfig.thresholds`.
+- **More detail.** `JevTrace(full=True)` also prints each question's wording and the whole state.
+- **A file to work through.** `JevTrace(path="jev_trace.jsonl")` appends one JSON object per request (`"type": "request"`, with the state, questions, answers, thresholds, model, `cached`, and `error`) and one per decision (`"type": "decision"`). Run a batch of your own inputs, then compare the answers before you change a question or a threshold.
+- **Without code changes.** `JevTrace.from_env()` reads `JEV_TRACE=1` (short), `JEV_TRACE=full`, and `JEV_TRACE_FILE`, and returns `None` when none is set. Every quickstart passes it, so `JEV_TRACE=1 python examples/quickstart.py` shows each request.
+- **Every request counts.** Answers served from the cache are marked `cached`, and a failed request shows why it failed. A trace that raises is logged and never stops the run. Subagents that share the stack's runtime, as `register_jev_profile` sets up, are traced too.
+- **Decisions printed elsewhere.** If `on_event` already prints the decisions, `JevTrace(decisions=False)` leaves them out of the printout; the file keeps them.
+
 ## Switching blueprints
 
 Each blueprint is `off`, `shadow` (ask Jev and record, but change nothing), or `on`. Every blueprint starts `off`.

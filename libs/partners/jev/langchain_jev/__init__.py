@@ -68,6 +68,7 @@ from langchain_jev.switches import (
     ModeSource,
     StaticModeSource,
 )
+from langchain_jev.trace import JevRequest, JevTrace
 
 __all__ = [
     "BLUEPRINTS",
@@ -86,7 +87,9 @@ __all__ = [
     "JevConfig",
     "JevEvent",
     "JevModel",
+    "JevRequest",
     "JevRuntime",
+    "JevTrace",
     "Mark",
     "Mode",
     "ModeSource",

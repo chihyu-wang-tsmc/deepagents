@@ -27,9 +27,10 @@ from langchain_jev.thresholds import (
     clamped_thresholds,
     merge_thresholds,
 )
+from langchain_jev.trace import JevRequest
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
+    from collections.abc import Callable, Collection, Mapping
 
     from langchain_core.decisions import BaseDecisionModel, ClassifierResponse, Question
     from langchain_core.decisions.types import ClassifierRequest, State
@@ -198,9 +199,15 @@ class JevRuntime:
         key = _cache_key(classifier, state, questions)
         cached = self._cached(key)
         if cached is not None:
+            self._trace(blueprint, classifier, state, questions, cached, cached=True)
             return cached
-        response = classifier.invoke(_request(state, questions))
+        try:
+            response = classifier.invoke(_request(state, questions))
+        except Exception as error:
+            self._trace(blueprint, classifier, state, questions, None, error=error)
+            raise
         self._store(key, response)
+        self._trace(blueprint, classifier, state, questions, response)
         if self._shadow is not None:
             self._compare(blueprint, response, self._shadow_sync(state, questions))
         return response
@@ -213,17 +220,61 @@ class JevRuntime:
         key = _cache_key(classifier, state, questions)
         cached = self._cached(key)
         if cached is not None:
+            self._trace(blueprint, classifier, state, questions, cached, cached=True)
             return cached
+        try:
+            response, shadow = await self._ask_both(classifier, state, questions)
+        except Exception as error:
+            self._trace(blueprint, classifier, state, questions, None, error=error)
+            raise
+        self._store(key, response)
+        self._trace(blueprint, classifier, state, questions, response)
+        self._compare(blueprint, response, shadow)
+        return response
+
+    async def _ask_both(
+        self, classifier: BaseDecisionModel, state: object, questions: Mapping[str, Question]
+    ) -> tuple[ClassifierResponse, ClassifierResponse | None]:
+        """The main model's response, and the shadow model's when there is one."""
         request = _request(state, questions)
         if self._shadow is None:
-            response = await classifier.ainvoke(request)
-        else:
-            response, shadow = await asyncio.gather(
-                classifier.ainvoke(request), self._shadow_async(state, questions)
-            )
-            self._compare(blueprint, response, shadow)
-        self._store(key, response)
-        return response
+            return await classifier.ainvoke(request), None
+        return await asyncio.gather(
+            classifier.ainvoke(request), self._shadow_async(state, questions)
+        )
+
+    def _trace(
+        self,
+        blueprint: str,
+        classifier: BaseDecisionModel,
+        state: object,
+        questions: Mapping[str, Question],
+        response: ClassifierResponse | None,
+        *,
+        cached: bool = False,
+        error: Exception | None = None,
+    ) -> None:
+        """Hand the request to `JevConfig.trace`; a failing trace never affects the run."""
+        trace = self.config.trace
+        if trace is None:
+            return
+        owners = _owners(questions, blueprint, self.names)
+        entry = any(key.partition("::")[0] in self.names for key in questions if "::" in key)
+        request = JevRequest(
+            blueprints=owners,
+            model=str(getattr(classifier, "model", "") or type(classifier).__name__),
+            state=state,
+            questions=dict(questions),
+            answers=None if response is None else dict(response.answers),
+            thresholds={k: v for k, v in self.thresholds.items() if k.split(".", 1)[0] in owners},
+            cached=cached,
+            error=None if error is None else f"{type(error).__name__}: {error}"[:300],
+            entry=entry,
+        )
+        try:
+            trace.request(request)
+        except Exception:
+            logger.exception("Jev trace failed.")
 
     def _cached(self, key: str) -> ClassifierResponse | None:
         with self._lock:
@@ -285,13 +336,17 @@ class JevRuntime:
             event.action,
             event.details,
         )
-        callback = self.config.on_event
-        if callback is None:
-            return
-        try:
-            callback(event)
-        except Exception:
-            logger.exception("Jev on_event callback failed.")
+        callbacks = [c for c in (self.config.on_event, self._trace_decision) if c is not None]
+        for callback in callbacks:
+            try:
+                callback(event)
+            except Exception:
+                logger.exception("Jev on_event callback failed.")
+
+    @property
+    def _trace_decision(self) -> Callable[[JevEvent], None] | None:
+        trace = self.config.trace
+        return trace.decision if trace is not None else None
 
 
 def _request(state: object, questions: Mapping[str, Question]) -> ClassifierRequest:
@@ -311,6 +366,15 @@ def _cache_key(
         },
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _owners(
+    questions: Mapping[str, Question], asker: str, names: Collection[str]
+) -> tuple[str, ...]:
+    """The blueprints whose questions these are: entry questions are keyed `blueprint::qid`."""
+    heads = [key.partition("::")[0] for key in questions if "::" in key]
+    found = tuple(dict.fromkeys(head for head in heads if head in names))
+    return found or (asker,)
 
 
 def _owner(question: str, asker: str, names: Collection[str]) -> str:

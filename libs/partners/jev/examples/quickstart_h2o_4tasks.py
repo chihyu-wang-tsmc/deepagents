@@ -9,6 +9,12 @@
 印出 Jev 的判斷、機率和預期答案；最後統計每件事對了幾題。題目在下面的 CASES，
 可以換成自己的。
 
+每一題也印出每次呼叫模型「要求的模型」和「回應的模型」：
+    要求的模型  路由後真正送出去的模型名稱（Langfuse 裡的 metadata.ls_model_name）
+    回應的模型  API 回應裡回報的模型名稱（Langfuse 最後顯示的就是這個）
+兩個不一樣時會標 ⚠：gateway 可能改用別的模型回答（例如沒有部署、自動退回預設模型），
+或只是回報了別的名稱，請看 gateway 的設定或 log。
+
 執行前要設好的環境變數：
     H2O_BASE_URL   h2o-lightning shim 的網址（不設就用 http://localhost:8741）
 可選：
@@ -29,7 +35,8 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from deepagents import create_deep_agent
-from langchain_core.language_models import BaseChatModel
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.language_models import BaseChatModel, LangSmithParams
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from typing_extensions import override
@@ -45,8 +52,11 @@ from langchain_jev import (
 )
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from langchain_core.callbacks import CallbackManagerForLLMRun
     from langchain_core.messages import BaseMessage
+    from langchain_core.outputs import LLMResult
 
 
 # 1. 測試題和四件事的預期答案。被擋下的題目不會走到模型，後三項寫 None（不計分）
@@ -100,6 +110,12 @@ class StandIn(BaseChatModel):
         return "stand-in"
 
     @override
+    def _get_ls_params(self, stop: list[str] | None = None, **kwargs: object) -> LangSmithParams:
+        return LangSmithParams(
+            ls_provider="stand-in", ls_model_name=f"stand-in-{self.role}", ls_model_type="chat"
+        )
+
+    @override
     def bind_tools(self, tools: Sequence[object], **kwargs: object) -> StandIn:
         return self.model_copy(update={"tool_count": len(tools)})
 
@@ -112,7 +128,10 @@ class StandIn(BaseChatModel):
         **kwargs: object,
     ) -> ChatResult:
         reply = AIMessage(content=f"（{self.role} 模型回答，拿到 {self.tool_count} 個工具）")
-        return ChatResult(generations=[ChatGeneration(message=reply)])
+        generation = ChatGeneration(message=reply)
+        return ChatResult(
+            generations=[generation], llm_output={"model_name": f"stand-in-{self.role}"}
+        )
 
 
 def llm(role: str) -> BaseChatModel:
@@ -127,7 +146,58 @@ def llm(role: str) -> BaseChatModel:
     )
 
 
-# 3. 把每件事的事件讀成「判斷」和「依據」
+# 3. 記下每次呼叫模型「要求的模型」和「回應的模型」
+class ModelNames(BaseCallbackHandler):
+    """呼叫模型開始時記下送出去的模型，結束時記下 API 回報的模型。"""
+
+    def __init__(self) -> None:
+        self.requested: dict[UUID, str] = {}
+        self.calls: list[tuple[str, str]] = []
+
+    @override
+    def on_chat_model_start(
+        self,
+        serialized: dict[str, object],
+        messages: list[list[BaseMessage]],
+        *,
+        run_id: UUID,
+        metadata: dict[str, object] | None = None,
+        **kwargs: object,
+    ) -> None:
+        self.requested[run_id] = str((metadata or {}).get("ls_model_name") or "（不知道）")
+
+    @override
+    def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: object) -> None:
+        if run_id in self.requested:  # 只記聊天模型；Jev 的請求不會經過這裡
+            self.calls.append((self.requested.pop(run_id), answered_model(response)))
+
+
+def answered_model(response: LLMResult) -> str:
+    """API 回應裡回報的模型名稱：OpenAI 相容 API 放在回應的 model 欄位。"""
+    named = (response.llm_output or {}).get("model_name")
+    if not named and response.generations and response.generations[0]:
+        message = getattr(response.generations[0][0], "message", None)
+        named = getattr(message, "response_metadata", {}).get("model_name")
+    return str(named or "（沒有回報）")
+
+
+def show_models(calls: list[tuple[str, str]]) -> int:
+    """印出每次呼叫模型的兩個名稱，回傳名稱不一樣的次數。"""
+    if not calls:
+        print("    模型：沒有呼叫模型")
+        return 0
+    different = 0
+    for index, (requested, answered) in enumerate(calls, 1):
+        # 回應的名稱常會多帶版本或前綴（例如 gpt-4o-2024-08-06），包含要求的名稱就算一樣
+        same = requested in answered
+        different += not same
+        mark = "" if same else "  ⚠ 不一樣：gateway 可能改用別的模型回答，或回報了別的名稱"
+        label = "模型" if len(calls) == 1 else f"模型（第 {index} 次呼叫）"
+        print(f"    {label}：要求 {requested} → 回應 {answered}{mark}")
+    return different
+
+
+# 4. 把每件事的事件讀成「判斷」和「依據」
 def read_guard(event: JevEvent) -> tuple[str, str]:
     label = {"pass": "放行", "block": "擋下", "review": "提醒"}.get(event.action)
     if label is None:
@@ -163,7 +233,7 @@ TASKS: list[tuple[str, str, str, Reader]] = [
     ("模式", "chat_mode", "mode", read_mode),
 ]
 
-# 4. 只開這四個藍圖；四件事的題目合成一次 Jev 請求
+# 5. 只開這四個藍圖；四件事的題目合成一次 Jev 請求
 events: list[JevEvent] = []
 config = JevConfig(
     model="h2o-lightning-4b",
@@ -183,7 +253,7 @@ config = JevConfig(
 agent = create_deep_agent(model=llm("default"), middleware=jev_middleware(config))
 
 
-# 5. 每一題印出四件事的判斷，和預期答案比對
+# 6. 每一題印出四件事的判斷，和預期答案比對
 def check(case: Case, score: dict[str, list[int]]) -> None:
     blocked = False
     for name, blueprint, field, read in TASKS:
@@ -207,14 +277,21 @@ def check(case: Case, score: dict[str, list[int]]) -> None:
 
 
 score = {field: [0, 0] for _, _, field, _ in TASKS}
+different = 0
 for number, case in enumerate(CASES, 1):
     events.clear()
-    result = agent.invoke({"messages": [{"role": "user", "content": case.request}]})
+    names = ModelNames()
+    result = agent.invoke(
+        {"messages": [{"role": "user", "content": case.request}]}, config={"callbacks": [names]}
+    )
     print(f"\n[{number}] {case.request}")
     check(case, score)
+    different += show_models(names.calls)
     print(f"    回答：{str(result['messages'][-1].content)[:80]}")
 
 print("\n=== 每件事對了幾題 ===")
 for name, _, field, _ in TASKS:
     right, total = score[field]
     print(f"    {name}：{right}/{total}")
+if different:
+    print(f"\n⚠ 有 {different} 次呼叫，回應的模型和要求的不一樣，請檢查 gateway 的模型設定")

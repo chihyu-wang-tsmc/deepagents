@@ -156,8 +156,9 @@ class ToolGateSettings:
     tools: Sequence[str] | None = None
     """The only tools to check; `None` checks every tool except those in `skip`.
 
-    `None` covers your own tools, MCP tools, and the tools subagents call, so a tool
-    added later is checked without being listed here.
+    `None` covers your own tools and MCP tools, so a tool added later is checked
+    without being listed here. With `register_jev_profile`, it also covers the tools
+    subagents call.
     """
 
     skip: Sequence[str] = field(default=("ls", "read_file", "glob", "grep"), kw_only=True)

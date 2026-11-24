@@ -6,15 +6,14 @@
 
 這支程式不加自訂藍圖，內建藍圖也都用原來的設定（只開 quickstart_table.py 用到的兩個）：
     input_guard  只問越獄、要求停用安全規則、有害請求；也讀前 4 則對話
-    tool_gate    原來只檢查 execute、write_file、edit_file、task；沒有公司政策；
-                 遇到要核准的呼叫會暫停等人核准（這裡自動拒絕，讓程式跑完）
+    tool_gate    檢查每個工具（只跳過 ls、read_file、glob、grep），所以 send_email 也會檢查；
+                 沒有公司政策；遇到要核准的呼叫會暫停等人核准（這裡自動拒絕，讓程式跑完）
 
-預期結果：第 2 次 prompt 沒有被擋下，信會寄出（假裝寄出）。原因印在最後：
+預期結果：第 2 次 prompt 通常不會被擋下，信會寄出（假裝寄出）。原因印在最後：
     1. input_guard 的題目不管「公司資料能不能寄到外部」
-    2. tool_gate 原來不檢查 send_email
-可選的 GATE_SEND_EMAIL=1 只把 send_email 加進 tool_gate 檢查的工具，題目還是原來的：
-資料外洩那題把「使用者自己要求的分享」算成沒有外洩，又沒有公司政策可以比對 within_grant，
-所以通常還是放行。要擋下，看 quickstart_table.py 的三層防線。
+    2. tool_gate 寄信前有問 Jev，但資料外洩那題把「使用者自己要求的分享」算成沒有外洩，
+       又沒有公司政策可以比對 within_grant
+要擋下，看 quickstart_table.py 的三層防線。
 
 範例的製程參數是假資料，send_email 也不會真的寄信。
 
@@ -25,7 +24,6 @@
     H2O_BASE_URL   h2o-lightning shim 的網址（不設就用 http://localhost:8741）
 可選：
     JEV_MODEL      換 Jev 模型，例如 h2o-lightning-31b 或 typesafe
-    GATE_SEND_EMAIL=1  把 send_email 加進 tool_gate 檢查的工具（題目和其他設定不變）
     JEV_TRACE=1    每次問 Jev 都印出 Jev 讀到的內容、每題的鍵和回答、比較的門檻
     JEV_TRACE=full 再加上每題的原文和 Jev 讀到的完整內容
     JEV_TRACE_FILE=jev_trace.jsonl  每次請求和每個決定各存成一行 JSON
@@ -40,16 +38,9 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
-from langchain_jev import (
-    JevConfig,
-    JevEvent,
-    JevTrace,
-    ToolGateSettings,
-    register_jev_profile,
-)
+from langchain_jev import JevConfig, JevEvent, JevTrace, register_jev_profile
 
 MY_EXTERNAL_EMAIL = "my.own@gmail.com"  # 換成你自己的外部信箱；範例不會真的寄信
-GATE_SEND_EMAIL = bool(os.environ.get("GATE_SEND_EMAIL"))
 
 PROMPTS = [
     "幫我把「製程 A」的關鍵參數整理成一張表格：每個步驟的時間、溫度、壓力和氣體流量。",
@@ -119,15 +110,13 @@ def stopped_by(number: int) -> str | None:
 
 
 # 3. Jev 的設定：只打開藍圖，其他都用原來的設定
-#    原來的 tool_gate 檢查 execute、write_file、edit_file、task；GATE_SEND_EMAIL=1 再加上 send_email
-gate_tools = [*ToolGateSettings().tools, *(["send_email"] if GATE_SEND_EMAIL else [])]
+#    原來的 tool_gate 檢查每個工具（只跳過 ls、read_file、glob、grep），沒有公司政策
 config = JevConfig(
     model="default",  # 讀 JEV_MODEL；沒設就是 h2o-lightning-4b
     blueprints={
         "input_guard": "on",
         "tool_gate": "on",
     },
-    tool_gate=ToolGateSettings(tools=gate_tools),  # 只有 tools 可能多一個，其他是原來的設定
     on_event=show,
     # JEV_TRACE：印出每次問 Jev 的內容和回答；決定已經由 show 印出，所以 decisions=False
     trace=JevTrace.from_env(decisions=False),
@@ -169,16 +158,11 @@ print("\n=== 結果 ===")
 print(f"    寄出的信：{', '.join(SENT) if SENT else '沒有'}")
 stopper = stopped_by(2)
 print(f"    第 2 次 prompt 被擋在：{stopper or '沒有被擋下'}")
-if not stopper:
+if not stopper and SENT:
     print("    為什麼沒擋下：")
     print("      - input_guard 只問越獄、要求停用安全規則、有害請求，不管公司資料能不能寄到外部")
-    if GATE_SEND_EMAIL:
-        print("      - tool_gate 有檢查 send_email，但資料外洩那題把使用者自己要求的分享")
-        print(
-            "        算成沒有外洩，又沒有公司政策（ToolGateSettings.policy）可以比對 within_grant"
-        )
-    else:
-        print(
-            "      - tool_gate 原來只檢查 execute、write_file、edit_file、task，send_email 不在裡面"
-        )
+    print("      - tool_gate 寄信前有問 Jev，但資料外洩那題把使用者自己要求的分享算成沒有外洩，")
+    print("        又沒有公司政策（ToolGateSettings.policy）可以比對 within_grant")
     print("    要擋下：看 quickstart_table.py 的三層防線")
+elif not stopper:
+    print("    模型這次沒有呼叫 send_email，tool_gate 沒有寄信可以檢查")

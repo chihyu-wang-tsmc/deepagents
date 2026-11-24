@@ -153,12 +153,30 @@ class RagSettings:
 class ToolGateSettings:
     """Checks on tool calls before they run."""
 
-    tools: Sequence[str] = ("execute", "write_file", "edit_file", "task")
+    tools: Sequence[str] | None = None
+    """The only tools to check; `None` checks every tool except those in `skip`.
+
+    `None` covers your own tools, MCP tools, and the tools subagents call, so a tool
+    added later is checked without being listed here.
+    """
+
+    skip: Sequence[str] = field(default=("ls", "read_file", "glob", "grep"), kw_only=True)
+    """Tools left unchecked when `tools` is `None`; `()` checks every call.
+
+    The default skips the deepagents tools that only read local files.
+    """
+
     ask_human: bool = True
     """Pause for approval instead of refusing; needs a checkpointer."""
 
     policy: str | None = None
     """The agent's entitlements and rules; enables the `within_grant` check."""
+
+    def checks(self, tool: str) -> bool:
+        """Whether calls to `tool` are checked before they run."""
+        if self.tools is not None:
+            return tool in self.tools
+        return tool not in self.skip
 
 
 @dataclass(frozen=True)
@@ -201,7 +219,7 @@ class ReviewSettings:
     on_run_end: Callable[[list[AnyMessage]], None] | None = None
     """Called with the transcript, for reviewing later off the request path."""
 
-    irreversible_tools: Sequence[str] = ("execute", "write_file", "edit_file")
+    irreversible_tools: Sequence[str] = ("execute", "write_file", "edit_file", "delete")
     agent_instructions: str | None = None
     """The agent's entitlements and rules; enables the review's `within_grant` check."""
 
@@ -365,6 +383,7 @@ class JevConfig:
             raise ValueError(msg)
         self._check_hazards()
         self._check_history()
+        self._check_tool_names()
         self._check_router()
         self._check_questions()
 
@@ -423,6 +442,15 @@ class JevConfig:
         if self.guard.input_history < 0:
             msg = f"`guard.input_history` must be 0 or more, not {self.guard.input_history}."
             raise ValueError(msg)
+
+    def _check_tool_names(self) -> None:
+        for label, names in (
+            ("tool_gate.tools", self.tool_gate.tools),
+            ("tool_gate.skip", self.tool_gate.skip),
+        ):
+            if isinstance(names, str):
+                msg = f"`{label}` takes a list of tool names, such as [{names!r}], not a string."
+                raise TypeError(msg)
 
     def _check_router(self) -> None:
         if self.router is None:

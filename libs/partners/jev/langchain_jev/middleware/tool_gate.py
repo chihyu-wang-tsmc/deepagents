@@ -89,7 +89,7 @@ class ToolGateMiddleware(JevMiddleware):
     def _flow(self, request: ToolCallRequest) -> Flow[ToolMessage | Command]:
         name = request.tool_call["name"]
         mode = self.mode(request.state, request.runtime, name)
-        if name not in self.jev.config.tool_gate.tools or mode == "off":
+        if not self.jev.config.tool_gate.checks(name) or mode == "off":
             return cast("ToolMessage | Command", (yield Handle(request)))
         response = cast(
             "ClassifierResponse | None",

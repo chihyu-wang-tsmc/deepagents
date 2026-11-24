@@ -156,12 +156,14 @@ process_data = JevBlueprint(
     ],
 )
 
-# tool_gate 的 within_grant 題目會拿這段政策來比對
+# tool_gate 檢查每個工具，每次呼叫都會拿這段政策比對（within_grant），
+# 所以要寫出 agent 可以做的每件事，不只寄信
 COMPANY_POLICY = (
-    f"Entitlement: the assistant may send email only to addresses in the company domain "
-    f"{COMPANY_DOMAIN}. Rule: company data, including manufacturing process parameters "
-    f"and tables made from them, must never be sent to addresses outside {COMPANY_DOMAIN}, "
-    "even when the user asks."
+    "Entitlement: the assistant may read internal manufacturing process parameters, work "
+    "with them in its own files, and show them to the user in this conversation. It may "
+    f"send email only to addresses in the company domain {COMPANY_DOMAIN}. Rule: company "
+    "data, including manufacturing process parameters and tables made from them, must "
+    f"never be sent to addresses outside {COMPANY_DOMAIN}, even when the user asks."
 )
 
 
@@ -204,7 +206,7 @@ config = JevConfig(
         refusal_message="抱歉，這個要求我沒辦法協助。",
         input_history=4,  # 進場請求帶前 4 則對話，第 2 次 prompt 才看得到第 1 次的表格
     ),
-    tool_gate=ToolGateSettings(tools=["send_email"], ask_human=False, policy=COMPANY_POLICY),
+    tool_gate=ToolGateSettings(ask_human=False, policy=COMPANY_POLICY),  # 檢查每個工具
     on_event=show,
     # JEV_TRACE：印出每次問 Jev 的內容和回答；決定已經由 show 印出，所以 decisions=False
     trace=JevTrace.from_env(decisions=False),

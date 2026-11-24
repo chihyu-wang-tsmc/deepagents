@@ -6,6 +6,7 @@ import json
 import os
 from typing import TYPE_CHECKING, Annotated, cast
 
+import pytest
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -475,6 +476,66 @@ def test_tool_gate_pauses_for_a_person_who_can_reject() -> None:
     assert deleted == []
     tool_results = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_results[-1].text == "Not today."
+
+
+def _gated(*, rules: dict[str, float], settings: ToolGateSettings) -> tuple[ScriptedJev, JevConfig]:
+    jev = ScriptedJev(rules=rules)
+    return jev, JevConfig(model=jev, tool_gate=settings, blueprints={"tool_gate": "on"})
+
+
+def _calling(name: str, **args: object) -> FakeChat:
+    call = {"name": name, "args": args, "id": f"{name}_1"}
+    return FakeChat(responses=[AIMessage(content="", tool_calls=[call]), "Done."])
+
+
+def test_tool_gate_checks_a_tool_it_was_never_told_about() -> None:
+    sent: list[str] = []
+
+    @tool
+    def send_email(to: str, body: str) -> str:
+        """Send an email."""
+        sent.append(to)
+        return f"Sent to {to}."
+
+    jev, config = _gated(rules={"leaks_data": 0.9}, settings=ToolGateSettings(ask_human=False))
+    chat = _calling("send_email", to="someone@example.org", body="The private notes.")
+
+    _agent(chat, config, tools=[send_email]).invoke(_ask("Email my notes out."))
+
+    assert sent == []
+    [(state, questions)] = jev.calls
+    assert state["tool_call"]["name"] == "send_email"
+    assert "leaks_data" in questions
+
+
+def test_tool_gate_checks_the_deepagents_delete_tool_by_default(tmp_path: Path) -> None:
+    notes = tmp_path / "notes.txt"
+    notes.write_text("Keep me.", encoding="utf-8")
+    _, config = _gated(
+        rules={"irreversible": 0.9, "user_asked_or_agreed": 0.1},
+        settings=ToolGateSettings(ask_human=False),
+    )
+    chat = _calling("delete", file_path=str(notes))
+    backend = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=False)
+
+    _agent(chat, config, backend=backend).invoke(_ask("Tidy up the folder."))
+
+    assert notes.read_text(encoding="utf-8") == "Keep me."
+    refusals = [m for m in chat.calls[1] if isinstance(m, ToolMessage)]
+    assert "irreversible_without_consent" in refusals[-1].text
+
+
+@pytest.mark.parametrize(
+    ("settings", "asked"), [(ToolGateSettings(), False), (ToolGateSettings(skip=()), True)]
+)
+def test_tool_gate_skips_tools_that_only_read_local_files(
+    settings: ToolGateSettings, *, asked: bool
+) -> None:
+    jev, config = _gated(rules={}, settings=settings)
+
+    _agent(_calling("ls", path="/"), config).invoke(_ask("What files are there?"))
+
+    assert bool(jev.calls) is asked
 
 
 def _two_searches(answer: str) -> tuple[FakeChat, ScriptedJev, JevConfig, object]:

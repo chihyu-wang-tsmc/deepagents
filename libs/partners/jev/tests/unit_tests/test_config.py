@@ -20,6 +20,7 @@ from langchain_jev import (
     RouteChoice,
     RouterSettings,
     StaticModeSource,
+    ToolGateSettings,
     VerifySettings,
     get_jev_model,
     jev_middleware,
@@ -88,6 +89,34 @@ def test_removed_hazards_are_named_in_the_error() -> None:
 def test_input_history_cannot_be_negative() -> None:
     with pytest.raises(ValueError, match="input_history"):
         JevConfig(guard=GuardSettings(input_history=-1)).installed()
+
+
+@pytest.mark.parametrize(
+    ("settings", "tool", "checked"),
+    [
+        (ToolGateSettings(), "send_email", True),
+        (ToolGateSettings(), "delete", True),
+        (ToolGateSettings(), "task", True),
+        (ToolGateSettings(), "read_file", False),
+        (ToolGateSettings(), "ls", False),
+        (ToolGateSettings(skip=()), "read_file", True),
+        (ToolGateSettings(tools=["send_email"]), "send_email", True),
+        (ToolGateSettings(tools=["send_email"]), "delete", False),
+        (ToolGateSettings(tools=["read_file"]), "read_file", True),
+    ],
+)
+def test_the_tool_gate_checks_every_tool_but_the_skipped_ones_unless_given_a_list(
+    settings: ToolGateSettings, tool: str, *, checked: bool
+) -> None:
+    assert settings.checks(tool) is checked
+
+
+@pytest.mark.parametrize("field", ["tools", "skip"])
+def test_tool_gate_names_must_be_a_list_not_a_string(field: str) -> None:
+    settings = ToolGateSettings(**{field: "send_email"})  # ty: ignore[invalid-argument-type]
+
+    with pytest.raises(TypeError, match=rf"`tool_gate\.{field}` takes a list"):
+        JevConfig(tool_gate=settings).installed()
 
 
 def test_answer_checks_without_a_source_warn(caplog: pytest.LogCaptureFixture) -> None:

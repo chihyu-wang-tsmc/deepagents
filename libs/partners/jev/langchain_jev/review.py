@@ -87,7 +87,7 @@ class RunReview:
 class RunContext:
     """What the review knows about the agent besides its transcript."""
 
-    irreversible_tools: Sequence[str] = ("execute", "write_file", "edit_file")
+    irreversible_tools: Sequence[str] = ("execute", "write_file", "edit_file", "delete")
     instructions: str | None = None
     purpose: str | None = None
     feedback: str | None = None

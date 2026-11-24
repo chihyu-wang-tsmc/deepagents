@@ -508,6 +508,33 @@ def test_tool_gate_checks_a_tool_it_was_never_told_about() -> None:
     assert "leaks_data" in questions
 
 
+def test_tool_gate_refuses_a_leak_without_asking_for_approval() -> None:
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    sent: list[str] = []
+
+    @tool
+    def send_email(to: str, body: str) -> str:
+        """Send an email."""
+        sent.append(to)
+        return f"Sent to {to}."
+
+    _, config = _gated(
+        rules={"leaks_data": 0.9, "user_asked_or_agreed": 0.95}, settings=ToolGateSettings()
+    )
+    chat = _calling("send_email", to="me@example.org", body="The process parameters.")
+    agent = _agent(chat, config, tools=[send_email], checkpointer=InMemorySaver())
+
+    result = agent.invoke(
+        _ask("Email the table to my own address."), {"configurable": {"thread_id": "leak"}}
+    )
+
+    assert "__interrupt__" not in result
+    assert sent == []
+    refusals = [m for m in result["messages"] if isinstance(m, ToolMessage)]
+    assert "leaks_data" in refusals[-1].text
+
+
 def test_tool_gate_checks_the_deepagents_delete_tool_by_default(tmp_path: Path) -> None:
     notes = tmp_path / "notes.txt"
     notes.write_text("Keep me.", encoding="utf-8")

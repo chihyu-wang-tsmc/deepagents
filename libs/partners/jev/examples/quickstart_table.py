@@ -9,8 +9,8 @@
 這支程式準備了三層防線，看 Jev 在哪一層擋下：
     1. export_request（自訂，entry）：連同前幾輪對話判斷，這次是不是要把公司資料寄到公司外部
        → 第 2 次 prompt 一進來就拒答，不會呼叫模型
-    2. tool_gate（內建，寄信前）：加上公司政策（ToolGateSettings.policy）後，判斷寄信是否違反政策
-       → 內建的「資料外洩」題目把「使用者自己要求分享」算成沒有外洩，所以要靠政策的 within_grant 擋
+    2. tool_gate（內建，寄信前）：資料外洩那題把公司資料寄到公司外部算成外洩，使用者自己要求也算；
+       加上公司政策（ToolGateSettings.policy）後，within_grant 也照政策擋，政策也告訴 Jev 公司網域
     3. external_recipient（自訂，寄信前）：收件人是不是公司外部的信箱
 另外 process_data（自訂，工具結果）讀到製程參數後，在同一次執行裡會擋 send_email、提醒模型；
 但它只在那一次執行有效，擋不到第 2 次 prompt 才提出的寄信——所以需要第 1 層讀前幾輪對話。
@@ -176,8 +176,9 @@ def show(event: JevEvent) -> None:
     events.append((current, event))
     details = event.details
     shown = details.get("answers") or details.get("tool") or details.get("reasons") or ""
+    reasons = f"  {details['reasons']}" if details.get("tool") and details.get("reasons") else ""
     where = f"  → {details['at']}" if details.get("at") else ""
-    print(f"   [jev] {event.blueprint:<18} {event.mode:<6} {event.action}  {shown}{where}")
+    print(f"   [jev] {event.blueprint:<18} {event.mode:<6} {event.action}  {shown}{reasons}{where}")
 
 
 def stopped_by(number: int) -> str | None:
@@ -195,7 +196,7 @@ config = JevConfig(
     model="default",  # 讀 JEV_MODEL；沒設就是 h2o-lightning-4b
     blueprints={
         "input_guard": "on",  # 越獄、有害請求；也讀前幾輪對話
-        "tool_gate": "on",  # 第 2 層：寄信前，照公司政策判斷
+        "tool_gate": "on",  # 第 2 層：寄信前，問資料外洩，也照公司政策判斷
         "export_request": "on",  # 第 1 層
         "external_recipient": "on",  # 第 3 層
         "process_data": "on",  # 只在同一次執行有效

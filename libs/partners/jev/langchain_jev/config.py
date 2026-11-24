@@ -168,7 +168,12 @@ class ToolGateSettings:
     """
 
     ask_human: bool = True
-    """Pause for approval instead of refusing; needs a checkpointer."""
+    """Pause for approval instead of refusing; needs a checkpointer.
+
+    Only risky calls, and irreversible calls the user did not ask for, pause. Calls that
+    would leak data, that follow instructions inside tool results, or that fall outside
+    `policy` are refused either way.
+    """
 
     policy: str | None = None
     """The agent's entitlements and rules; enables the `within_grant` check."""

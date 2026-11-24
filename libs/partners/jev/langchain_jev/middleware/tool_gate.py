@@ -3,7 +3,8 @@
 Builds on LangChain's `AutoModeMiddleware` (one "is this risky" Noul) with the
 per-action safety questions of https://evals.typesafe.ai/agent_trace_observability,
 asked in one request. Risky calls pause for a person (human-in-the-loop) or are
-refused; calls driven by instructions inside tool results are always refused.
+refused. Calls that would leak data, that follow instructions inside tool results, or
+that fall outside the policy are always refused.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ def gate(nouls: Mapping[str, float], thresholds: Mapping[str, float]) -> tuple[s
                 "within_grant",
                 nouls.get("within_grant", 1.0) < thresholds["within_grant"],
             ),
+            ("leaks_data", nouls["leaks_data"] >= thresholds["leaks_data"]),
         )
         if failed
     ]
@@ -51,7 +53,6 @@ def gate(nouls: Mapping[str, float], thresholds: Mapping[str, float]) -> tuple[s
         name
         for name, failed in (
             ("risky", nouls["risky"] >= thresholds["risky"]),
-            ("leaks_data", nouls["leaks_data"] >= thresholds["leaks_data"]),
             (
                 "irreversible_without_consent",
                 nouls["irreversible"] >= thresholds["irreversible"]

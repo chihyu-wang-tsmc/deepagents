@@ -7,13 +7,15 @@
 這支程式不加自訂藍圖，內建藍圖也都用原來的設定（只開 quickstart_table.py 用到的兩個）：
     input_guard  只問越獄、要求停用安全規則、有害請求；也讀前 4 則對話
     tool_gate    檢查每個工具（只跳過 ls、read_file、glob、grep），所以 send_email 也會檢查；
-                 沒有公司政策；遇到要核准的呼叫會暫停等人核准（這裡自動拒絕，讓程式跑完）
+                 沒有公司政策；資料外洩直接擋下，風險高的呼叫會暫停等人核准
+                 （這裡自動拒絕，讓程式跑完）
 
-預期結果：第 2 次 prompt 通常不會被擋下，信會寄出（假裝寄出）。原因印在最後：
-    1. input_guard 的題目不管「公司資料能不能寄到外部」
-    2. tool_gate 寄信前有問 Jev，但資料外洩那題把「使用者自己要求的分享」算成沒有外洩，
-       又沒有公司政策可以比對 within_grant
-要擋下，看 quickstart_table.py 的三層防線。
+預期結果：第 2 次 prompt 在寄信前被 tool_gate 擋下。資料外洩那題把「公司資料寄到公司外部」
+算成外洩，使用者自己要求、寄到自己的信箱也算，所以不經人工核准就直接擋下。
+input_guard 不管這件事：它只問越獄、要求停用安全規則、有害請求。
+
+跟 quickstart_table.py 對照：那支多了讀前幾輪對話的 export_request（第 2 次 prompt 一進來
+就拒答，不用等到寄信）、公司政策（within_grant），以及檢查收件人網域的 external_recipient。
 
 範例的製程參數是假資料，send_email 也不會真的寄信。
 
@@ -98,7 +100,8 @@ def show(event: JevEvent) -> None:
     events.append((current, event))
     details = event.details
     shown = details.get("tool") or details.get("hazard") or ""
-    print(f"   [jev] {event.blueprint:<12} {event.mode:<6} {event.action}  {shown}")
+    reasons = f"  {details['reasons']}" if details.get("reasons") else ""
+    print(f"   [jev] {event.blueprint:<12} {event.mode:<6} {event.action}  {shown}{reasons}")
 
 
 def stopped_by(number: int) -> str | None:
@@ -159,10 +162,7 @@ print(f"    寄出的信：{', '.join(SENT) if SENT else '沒有'}")
 stopper = stopped_by(2)
 print(f"    第 2 次 prompt 被擋在：{stopper or '沒有被擋下'}")
 if not stopper and SENT:
-    print("    為什麼沒擋下：")
-    print("      - input_guard 只問越獄、要求停用安全規則、有害請求，不管公司資料能不能寄到外部")
-    print("      - tool_gate 寄信前有問 Jev，但資料外洩那題把使用者自己要求的分享算成沒有外洩，")
-    print("        又沒有公司政策（ToolGateSettings.policy）可以比對 within_grant")
-    print("    要擋下：看 quickstart_table.py 的三層防線")
+    print("    為什麼沒擋下：tool_gate 寄信前有問 Jev，但資料外洩那題的分數低於門檻")
+    print("    用 JEV_TRACE=1 看 Jev 的回答；要多幾層防線，看 quickstart_table.py")
 elif not stopper:
     print("    模型這次沒有呼叫 send_email，tool_gate 沒有寄信可以檢查")

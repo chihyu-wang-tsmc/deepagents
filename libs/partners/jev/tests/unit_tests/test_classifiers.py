@@ -94,6 +94,16 @@ def test_a_rejected_request_is_not_retried() -> None:
     assert len(seen) == 1
 
 
+def test_a_rejection_shows_what_the_server_said() -> None:
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": "too many options in 'which'"})
+
+    classifier = SystemOneClassifier(transport=httpx.MockTransport(handle), retry_backoff=0)
+
+    with pytest.raises(JevClassifierError, match="too many options in 'which'"):
+        classifier.invoke({"state": "hi", "questions": {"urgent": QUESTIONS["urgent"]}})
+
+
 async def test_async_requests_use_the_async_transport() -> None:
     seen: list[httpx.Request] = []
 

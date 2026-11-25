@@ -79,7 +79,10 @@ class SkillSuggestionMiddleware(JevMiddleware):
         mode = self.mode(state, runtime)
         skills = list(state.get("skills_metadata") or [])
         request = latest_request(state["messages"])
-        if mode == "off" or not skills or not request:
+        if mode == "off":
+            return {"jev_skill_done": True}
+        if not skills or not request:
+            self.record(mode, "skip", reason="no_request" if skills else "no_skills")
             return {"jev_skill_done": True}
         shortlist = yield from self._rank(request, skills)
         winner, fits = (None, 0.0)

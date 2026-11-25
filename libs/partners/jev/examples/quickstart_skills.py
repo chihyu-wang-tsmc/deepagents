@@ -178,12 +178,23 @@ agent = create_deep_agent(
 
 
 # 5. 每一題印出 Jev 挑的 skill，和預期答案比對
-def suggestion() -> tuple[str | None, str] | None:
+def problem() -> str | None:
+    """這一題 skill_suggestion 沒有挑出結果的原因；有結果時回傳 None。"""
+    actions = {e.action: e.details for e in events if e.blueprint == "skill_suggestion"}
+    if "error" in actions:  # Jev 回了錯誤、逾時或連不上
+        return f"Jev 請求失敗：{actions['error']['error']}: {actions['error']['message']}"
+    if actions.get("skip", {}).get("reason") == "no_skills":
+        return "deepagents 沒有載入任何 skill，看上面 deepagents 的警告（例如 SKILL.md 格式不對）"
+    if not any(action.startswith("suggest:") for action in actions):
+        return "skill_suggestion 沒有執行，請確認 JEV_MODES 沒有把它關掉"
+    return None
+
+
+def suggestion() -> tuple[str | None, str]:
     """這一題 Jev 挑的 skill（None 是不需要 skill）和要印出來的說明。"""
-    actions = [e for e in events if e.blueprint == "skill_suggestion"]
-    event = next((e for e in actions if e.action.startswith("suggest:")), None)
-    if event is None or any(e.action == "error" for e in actions):
-        return None
+    event = next(
+        e for e in events if e.blueprint == "skill_suggestion" and e.action.startswith("suggest:")
+    )
     name, fits = event.action.removeprefix("suggest:"), float(event.details.get("fits", 0.0))
     if name != "none":
         return name, f"{name}（fits {fits:.2f}）"
@@ -194,11 +205,11 @@ def suggestion() -> tuple[str | None, str] | None:
 
 def report(case: Case, result: dict) -> bool | None:
     """印出這一題的結果；回傳挑得對不對，沒有結果時回傳 None。"""
-    picked = suggestion()
-    if picked is None:
-        print("    Jev 挑：沒有結果（Jev 連不上或出錯，或 skill_suggestion 被關掉了）")
+    reason = problem()
+    if reason is not None:
+        print(f"    Jev 挑：沒有結果。{reason}")
         return None
-    name, shown = picked
+    name, shown = suggestion()
     ok = name == case.expected
     print(f"    Jev 挑：{shown}  預期 {case.expected or '不需要 skill'} {'✓' if ok else '✗'}")
     for event in events:
@@ -227,4 +238,4 @@ print(f"    {sum(ok is True for ok in outcomes.values())}/{len(CASES)}")
 if wrong:
     print(f"    挑錯的題目：{wrong}，用 JEV_TRACE=1 看每個 skill 的分數")
 if missing:
-    print(f"    沒有結果的題目：{missing}，請確認 H2O_BASE_URL 和 JEV_MODES")
+    print(f"    沒有結果的題目：{missing}，原因印在每一題底下")

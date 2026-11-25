@@ -423,6 +423,18 @@ def test_skill_suggestion_hints_and_pins_the_winning_skill(tmp_path: Path) -> No
     assert "Use openpyxl for formulas." in sent  # pinned SKILL.md body
 
 
+def test_skill_suggestion_reports_a_skip_when_no_skill_is_loaded() -> None:
+    events: list[JevEvent] = []
+    config = JevConfig(
+        model=ScriptedJev(), blueprints={"skill_suggestion": "on"}, on_event=events.append
+    )
+
+    _agent(FakeChat(responses=["Sure."]), config).invoke(_ask("Make a budget spreadsheet."))
+
+    skips = [(e.blueprint, e.action, e.details) for e in events]
+    assert skips == [("skill_suggestion", "skip", {"reason": "no_skills"})]
+
+
 def _deleting_agent(deleted: list[str], *, decision: str) -> tuple[object, dict]:
     from langgraph.checkpoint.memory import InMemorySaver
 

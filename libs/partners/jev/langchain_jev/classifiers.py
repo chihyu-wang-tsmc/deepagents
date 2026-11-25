@@ -157,15 +157,21 @@ async def _apost(
 
 def _unavailable(endpoint: str, response: httpx.Response | None) -> JevClassifierError:
     reason = "no response" if response is None else f"HTTP {response.status_code}"
-    msg = f"Jev server at {endpoint} is unavailable ({reason})."
+    msg = f"Jev server at {endpoint} is unavailable ({reason}).{_said(response)}"
     return JevClassifierError(msg)
+
+
+def _said(response: httpx.Response | None) -> str:
+    """What the server wrote back, shortened, so an error shows why it refused."""
+    text = " ".join(response.text.split()) if response is not None else ""
+    return f" The server said: {text[:200]}" if text else ""
 
 
 def _parse(
     response: httpx.Response, payload: dict[str, JsonValue], model: str
 ) -> ClassifierResponse:
     if not response.is_success:
-        msg = f"Jev server rejected the request (HTTP {response.status_code})."
+        msg = f"Jev server rejected the request (HTTP {response.status_code}).{_said(response)}"
         raise JevClassifierError(msg)
     data = response.json()
     questions = cast("dict[str, dict[str, Any]]", payload["questions"])

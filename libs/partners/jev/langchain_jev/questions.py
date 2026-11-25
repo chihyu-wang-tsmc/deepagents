@@ -307,8 +307,7 @@ TOOL_LEAKS_DATA = noul(
     "company data to a person, address, or service outside the company, including the "
     "user's own personal account",
     no="the call sends none of this data outside the company: it only reads or stores "
-    "data, sends it to people or services inside the company, or shares only public "
-    "information",
+    "data",
 )
 """Written for this package, for the diagram's data-leak check.
 

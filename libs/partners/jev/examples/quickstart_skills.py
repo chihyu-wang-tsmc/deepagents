@@ -67,6 +67,25 @@ if not SKILLS_DIR.is_dir():
     raise SystemExit(msg)
 
 
+def linked_outside(folder: Path) -> list[Path]:
+    """連到 folder 外面的 skill 資料夾（symlink）。
+
+    deepagents 讀檔時不會跟著連結離開掛載的目錄，所以會略過這些 skill，而且不會警告。
+    """
+    root = folder.resolve()
+    return [p for p in folder.iterdir() if p.is_symlink() and not p.resolve().is_relative_to(root)]
+
+
+def warn_links(links: list[Path]) -> None:
+    print(f"⚠ 這些 skill 是連到 {SKILLS_DIR} 外面的捷徑（symlink），deepagents 會略過：")
+    print(f"    {', '.join(sorted(p.name for p in links))}")
+    targets = {p.resolve().parent for p in links}
+    if len(targets) == 1:
+        print(f"  改用真正的資料夾：SKILLS_DIR={targets.pop()} python quickstart_skills.py")
+    else:
+        print("  把它們複製進來（cp -rL），或讓 SKILLS_DIR 指到真正的資料夾")
+
+
 # 1. 題目：請求和預期的 skill；None 表示不需要 skill
 class Case(NamedTuple):
     request: str
@@ -184,7 +203,7 @@ def problem() -> str | None:
     if "error" in actions:  # Jev 回了錯誤、逾時或連不上
         return f"Jev 請求失敗：{actions['error']['error']}: {actions['error']['message']}"
     if actions.get("skip", {}).get("reason") == "no_skills":
-        return "deepagents 沒有載入任何 skill，看上面 deepagents 的警告（例如 SKILL.md 格式不對）"
+        return "deepagents 沒有載入任何 skill（看上面的警告：SKILL.md 格式不對，或 skill 是捷徑）"
     if not any(action.startswith("suggest:") for action in actions):
         return "skill_suggestion 沒有執行，請確認 JEV_MODES 沒有把它關掉"
     return None
@@ -224,6 +243,8 @@ def report(case: Case, result: dict) -> bool | None:
 
 names = sorted(path.parent.name for path in SKILLS_DIR.glob("*/SKILL.md"))
 print(f"skills：{SKILLS_DIR}（{len(names)} 個）\n    {', '.join(names)}")
+if links := linked_outside(SKILLS_DIR):
+    warn_links(links)
 outcomes: dict[int, bool | None] = {}
 for number, case in enumerate(CASES, 1):
     events.clear()
